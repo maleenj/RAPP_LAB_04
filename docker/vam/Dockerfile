@@ -90,6 +90,13 @@ RUN rosdep init || true && rosdep update
 # Install Python dependencies for ML and robotics
 COPY requirements.txt /tmp/requirements.txt
 RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel && \
+    # Force reinstall of packages that conflict with system-installed versions
+    pip3 install --no-cache-dir --ignore-installed \
+        blinker \
+        pyyaml \
+        numpy \
+        packaging \
+        pygments && \
     pip3 install --no-cache-dir -r /tmp/requirements.txt
 
 # Install PyTorch with CUDA 12.1 support (compatible with RTX 5070 Ti)

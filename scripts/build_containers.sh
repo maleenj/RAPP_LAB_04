@@ -21,7 +21,7 @@ echo "  - JupyterLab + all ML dependencies"
 echo ""
 
 # Build with progress output
-docker-compose build --progress=plain vam
+docker compose build --progress=plain vam
 
 echo ""
 echo "=================================================="
@@ -29,7 +29,7 @@ echo "Build complete!"
 echo ""
 echo "To start the container:"
 echo "  cd docker"
-echo "  docker-compose up -d"
+echo "  docker compose up -d"
 echo ""
 echo "To access Jupyter Lab:"
 echo "  http://localhost:8888"

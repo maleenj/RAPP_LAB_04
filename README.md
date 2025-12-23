@@ -2,7 +2,7 @@
 
 Real-time improvised physical theatre through Action Chunking Transformers. Teaching a UR10 robot to mirror and respond to human performers using skeletal tracking and learned movement patterns.
 
-**Project Lead:** Dr. Maleen Jayasuriya
+**Project Lead:** Dr. Maleen Jayasuriya, Piumi Wijesundara
 **Institution:** University of Canberra - Collaborative Robotics Lab
 **Research Context:** Building on RAPP Lab 03's biomechanics work, introducing AI-enabled improvisation for genuine ensemble partnership.
 

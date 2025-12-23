@@ -19,7 +19,7 @@ if [ "$(docker ps -q -f name=rapp_vam)" ]; then
     echo "To access shell: docker exec -it rapp_vam bash"
 else
     echo "Starting container..."
-    docker-compose up -d
+    docker compose up -d
 
     echo ""
     echo "Waiting for Jupyter Lab to start..."
