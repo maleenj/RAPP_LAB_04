@@ -1,0 +1,92 @@
+version: '3.8'
+
+services:
+  vam:
+    build:
+      context: ./vam
+      dockerfile: Dockerfile
+    container_name: rapp_vam
+    hostname: vam-container
+
+    # NVIDIA GPU support
+    runtime: nvidia
+
+    # Use host network for ROS2 communication with ZED container
+    network_mode: host
+
+    # Environment variables
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - DISPLAY=${DISPLAY:-:0}
+      - ROS_DOMAIN_ID=0
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - CUDA_VISIBLE_DEVICES=0
+      - QT_X11_NO_MITSHM=1
+      - LANG=en_US.UTF-8
+      - LC_ALL=en_US.UTF-8
+
+    # Volume mounts
+    volumes:
+      # Code directories (development mode - editable)
+      - ../vam_utils:/workspace/vam_utils:rw
+      - ../notebooks:/workspace/notebooks:rw
+      - ../ros2_ws:/workspace/ros2_ws:rw
+      - ../scripts:/workspace/scripts:rw
+
+      # Configuration (read-only)
+      - ../config:/config:ro
+
+      # Data volumes (host paths - IMPORTANT: Create these directories first!)
+      - /home/maleen/rosbags/rapplab04:/data/rosbags:ro
+      - /home/maleen/csvdata/rapplab04:/data/processed:rw
+      - /home/maleen/models/rapplab04:/data/models:rw
+      - /home/maleen/models/rapplab04/logs:/data/logs:rw
+
+      # X11 for GUI applications (RViz, matplotlib, etc.)
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ${HOME}/.Xauthority:/root/.Xauthority:rw
+
+      # Share GPU device files
+      - /dev/dri:/dev/dri:rw
+
+    # Device access
+    devices:
+      - /dev/dri:/dev/dri  # GPU access for visualization
+
+    # Ports (exposed even with host network for clarity)
+    ports:
+      - "8888:8888"  # Jupyter Lab
+      - "6006:6006"  # TensorBoard
+
+    # Keep container running
+    stdin_open: true
+    tty: true
+
+    # GPU reservation
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+    # Shared memory size (important for PyTorch DataLoader)
+    shm_size: '8gb'
+
+    # Restart policy
+    restart: unless-stopped
+
+# Optional: Include ZED container reference (not built here, just documented)
+# The ZED container should be running separately with the same ROS_DOMAIN_ID
+#
+# To start ZED container (from your existing setup):
+#   docker-compose -f <zed-docker-compose-path> up -d
+#
+# Both containers will communicate via ROS2 DDS on host network
+
+networks:
+  default:
+    name: rapp_network
+    external: false

@@ -1,0 +1,75 @@
+# RAPP Lab 04 - Python Dependencies
+# PyTorch will be installed separately with CUDA support
+
+# ============================================================================
+# Robotics Libraries
+# ============================================================================
+yourdfpy==0.0.56                 # URDF parsing and visualization
+roboticstoolbox-python==1.1.0    # Robotics utilities and kinematics
+spatialmath-python==1.1.7        # Spatial transformations
+swift-sim==1.1.0                 # Robot visualization (optional)
+
+# ============================================================================
+# ROS2 Python Tools
+# ============================================================================
+rosbags==0.9.19                  # Pure Python rosbag reader/writer
+pycryptodomex==3.19.0           # Required by rosbags for encryption
+
+# ============================================================================
+# Data Processing & Numerical Computing
+# ============================================================================
+numpy==1.24.3
+pandas==2.0.3
+scipy==1.11.1
+scikit-learn==1.3.0
+
+# ============================================================================
+# Visualization
+# ============================================================================
+matplotlib==3.7.2
+plotly==5.18.0
+kaleido==0.2.1                   # Static image export for Plotly
+dash==2.14.2                     # Interactive dashboards for skeleton selection
+ipywidgets==8.1.1                # Jupyter widgets
+opencv-python-headless==4.8.1.78 # Image processing (headless for containers)
+
+# ============================================================================
+# Machine Learning & Training
+# ============================================================================
+tensorboard==2.15.1              # Training visualization
+tqdm==4.66.1                     # Progress bars
+einops==0.7.0                    # Tensor operations (useful for transformers)
+
+# ============================================================================
+# Jupyter & Development
+# ============================================================================
+jupyterlab==4.0.9
+notebook==7.0.6
+ipykernel==6.27.1
+nbformat==5.9.2
+
+# ============================================================================
+# Configuration & Utilities
+# ============================================================================
+pyyaml==6.0.1                    # YAML configuration files
+python-dotenv==1.0.0             # Environment variable management
+omegaconf==2.3.0                 # Hierarchical configuration
+
+# ============================================================================
+# Testing & Quality
+# ============================================================================
+pytest==7.4.3
+pytest-cov==4.1.0
+black==23.12.1                   # Code formatting
+mypy==1.7.1                      # Type checking
+
+# ============================================================================
+# Data Validation
+# ============================================================================
+pydantic==2.5.3                  # Data validation
+
+# ============================================================================
+# Utilities
+# ============================================================================
+rich==13.7.0                     # Beautiful terminal output
+loguru==0.7.2                    # Better logging
