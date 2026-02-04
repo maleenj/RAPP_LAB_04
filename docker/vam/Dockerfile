@@ -79,6 +79,8 @@ RUN apt-get update && apt-get install -y \
     ros-${ROS2_DIST}-std-msgs \
     ros-${ROS2_DIST}-trajectory-msgs \
     ros-${ROS2_DIST}-visualization-msgs \
+    # RMW implementation (CycloneDDS for better performance)
+    ros-${ROS2_DIST}-rmw-cyclonedds-cpp \
     # Development tools
     ros-dev-tools \
     python3-argcomplete \
@@ -99,11 +101,12 @@ RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel && \
         pygments && \
     pip3 install --no-cache-dir -r /tmp/requirements.txt
 
-# Install PyTorch with CUDA 12.1 support (compatible with RTX 5070 Ti)
+# Install PyTorch with CUDA 12.1 support (compatible with RTX 5070 - sm_120)
+# PyTorch 2.3.0+ supports newer GPU architectures including RTX 50 series
 RUN pip3 install --no-cache-dir \
-    torch==2.1.2 \
-    torchvision==0.16.2 \
-    torchaudio==2.1.2 \
+    torch==2.4.0 \
+    torchvision==0.19.0 \
+    torchaudio==2.4.0 \
     --index-url https://download.pytorch.org/whl/cu121
 
 # Setup Jupyter Lab configuration

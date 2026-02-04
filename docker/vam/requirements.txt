@@ -5,6 +5,7 @@
 # Robotics Libraries
 # ============================================================================
 yourdfpy==0.0.56                 # URDF parsing and visualization
+urdf_parser_py==0.0.4            # ROS URDF parser (used by robot_state_publisher)
 roboticstoolbox-python==1.1.0    # Robotics utilities and kinematics
 spatialmath-python==1.1.7        # Spatial transformations
 swift-sim==1.1.0                 # Robot visualization (optional)
