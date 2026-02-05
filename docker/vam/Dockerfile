@@ -79,6 +79,7 @@ RUN apt-get update && apt-get install -y \
     ros-${ROS2_DIST}-std-msgs \
     ros-${ROS2_DIST}-trajectory-msgs \
     ros-${ROS2_DIST}-visualization-msgs \
+    ros-${ROS2_DIST}-zed-msgs \
     # RMW implementation (CycloneDDS for better performance)
     ros-${ROS2_DIST}-rmw-cyclonedds-cpp \
     # Development tools
