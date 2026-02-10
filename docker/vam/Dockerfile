@@ -1,12 +1,11 @@
 # RAPP Lab 04 - Vision-Action Model Docker Container
 # Ubuntu 22.04 + ROS2 Humble Desktop + PyTorch + JupyterLab
-# Compatible with RTX 5070 Ti (CUDA 12.1)
+# Compatible with RTX 5090 Blackwell (CUDA 12.8, sm_120)
 
-ARG CUDA_VERSION=12.1.0
-ARG CUDNN_VERSION=8
+ARG CUDA_VERSION=12.8.1
 ARG UBUNTU_VERSION=22.04
 
-FROM nvidia/cuda:${CUDA_VERSION}-cudnn${CUDNN_VERSION}-devel-ubuntu${UBUNTU_VERSION}
+FROM nvidia/cuda:${CUDA_VERSION}-cudnn-devel-ubuntu${UBUNTU_VERSION}
 
 ARG DEBIAN_FRONTEND=noninteractive
 ARG ROS2_DIST=humble
@@ -102,13 +101,12 @@ RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel && \
         pygments && \
     pip3 install --no-cache-dir -r /tmp/requirements.txt
 
-# Install PyTorch with CUDA 12.1 support (compatible with RTX 5070 - sm_120)
-# PyTorch 2.3.0+ supports newer GPU architectures including RTX 50 series
-RUN pip3 install --no-cache-dir \
-    torch==2.4.0 \
-    torchvision==0.19.0 \
-    torchaudio==2.4.0 \
-    --index-url https://download.pytorch.org/whl/cu121
+# Install PyTorch with CUDA 12.8 support (Blackwell / RTX 5090 sm_120)
+# Stable PyTorch does not yet support sm_120 — nightly with cu128 is required.
+# Once a stable release adds sm_120 support, pin to that version instead.
+RUN pip3 install --no-cache-dir --pre \
+    torch torchvision torchaudio \
+    --index-url https://download.pytorch.org/whl/nightly/cu128
 
 # Setup Jupyter Lab configuration
 RUN jupyter lab --generate-config && \
