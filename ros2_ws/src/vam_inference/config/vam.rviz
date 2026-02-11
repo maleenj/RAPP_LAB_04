@@ -1,0 +1,69 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+  - Class: rviz_common/Views
+    Name: Views
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Value: true
+      Cell Size: 0.5
+      Line Style:
+        Value: Lines
+      Normal Cell Count: 0
+      Plane: XY
+      Plane Cell Count: 10
+
+    - Class: rviz_default_plugins/TF
+      Name: TF
+      Value: true
+      Show Arrows: false
+      Show Axes: true
+      Show Names: true
+      Frame Timeout: 15
+      Frames:
+        All Enabled: true
+
+    - Class: rviz_default_plugins/RobotModel
+      Name: Actual Robot
+      Value: true
+      Description Topic:
+        Value: /robot_description
+      Alpha: 0.4
+      Visual Enabled: true
+      Collision Enabled: false
+
+    - Class: rviz_default_plugins/RobotModel
+      Name: VAM Prediction
+      Value: true
+      Description Topic:
+        Value: /vam/robot_description
+      Alpha: 1.0
+      Visual Enabled: true
+      Collision Enabled: false
+
+  Global Options:
+    Background Color: 48; 48; 48
+    Fixed Frame: map
+    Frame Rate: 30
+  Tools:
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/FocusCamera
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 3.0
+      Focal Point:
+        X: 0.5
+        Y: 0.0
+        Z: 0.5
+      Yaw: 0.785
+      Pitch: 0.5
+      Name: Current View
+Window Geometry:
+  Displays:
+    collapsed: false
+  Height: 900
+  Width: 1400

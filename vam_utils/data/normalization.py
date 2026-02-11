@@ -7,10 +7,12 @@ Only standardization (zero mean, unit variance) is applied.
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
+
+from vam_utils.data.episode import UR10_JOINT_LIMITS, get_joint_limits_tensor
 
 
 @dataclass
@@ -103,9 +105,33 @@ def apply_normalization(
     return skeleton_normed, joints_normed
 
 
+def normalize_joint_limits(stats: NormalizationStats) -> torch.Tensor:
+    """Convert UR10 physical joint limits to normalized space.
+
+    Returns:
+        Tensor of shape [6, 2] where [:, 0] = lower, [:, 1] = upper (normalized).
+    """
+    limits = get_joint_limits_tensor()  # [6, 2]
+    mean = torch.from_numpy(stats.joint_mean).float()  # [6]
+    std = torch.from_numpy(stats.joint_std).float()     # [6]
+    limits_normed = (limits - mean.unsqueeze(1)) / std.unsqueeze(1)
+    return limits_normed
+
+
 def inverse_normalize_joints(
     joints_normed: np.ndarray,
     stats: NormalizationStats,
+    clamp_to_limits: bool = False,
 ) -> np.ndarray:
-    """Reverse normalization on predicted joint angles (for inference)."""
-    return joints_normed * stats.joint_std + stats.joint_mean
+    """Reverse normalization on predicted joint angles (for inference).
+
+    Args:
+        joints_normed: normalized joint angles, any shape with last dim = 6
+        stats: normalization statistics
+        clamp_to_limits: if True, clamp output to UR10 physical joint limits
+    """
+    joints = joints_normed * stats.joint_std + stats.joint_mean
+    if clamp_to_limits:
+        limits = np.array(UR10_JOINT_LIMITS, dtype=np.float32)  # [6, 2]
+        joints = np.clip(joints, limits[:, 0], limits[:, 1])
+    return joints

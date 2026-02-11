@@ -7,6 +7,7 @@ from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
+import torch
 
 from vam_utils.config.data_config import DataPipelineConfig
 
@@ -21,6 +22,11 @@ UR10_JOINT_LIMITS = [
     (-6.283, 6.283),   # wrist_2
     (-6.283, 6.283),   # wrist_3
 ]
+
+
+def get_joint_limits_tensor() -> torch.Tensor:
+    """Return UR10 joint limits as a tensor of shape [6, 2] (lower, upper)."""
+    return torch.tensor(UR10_JOINT_LIMITS, dtype=torch.float32)
 
 
 @dataclass

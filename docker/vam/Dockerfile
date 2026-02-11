@@ -79,6 +79,9 @@ RUN apt-get update && apt-get install -y \
     ros-${ROS2_DIST}-trajectory-msgs \
     ros-${ROS2_DIST}-visualization-msgs \
     ros-${ROS2_DIST}-zed-msgs \
+    # UR10 robot + action interface for inference node
+    ros-${ROS2_DIST}-control-msgs \
+    ros-${ROS2_DIST}-ur-description \
     # RMW implementation (CycloneDDS for better performance)
     ros-${ROS2_DIST}-rmw-cyclonedds-cpp \
     # Development tools
@@ -98,15 +101,17 @@ RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel && \
         pyyaml \
         numpy \
         packaging \
-        pygments && \
+        pygments \
+        sympy && \
     pip3 install --no-cache-dir -r /tmp/requirements.txt
 
-# Install PyTorch with CUDA 12.8 support (Blackwell / RTX 5090 sm_120)
-# Stable PyTorch does not yet support sm_120 — nightly with cu128 is required.
-# Once a stable release adds sm_120 support, pin to that version instead.
-RUN pip3 install --no-cache-dir --pre \
-    torch torchvision torchaudio \
-    --index-url https://download.pytorch.org/whl/nightly/cu128
+# Install PyTorch with CUDA 12.8 support (Blackwell / RTX 5090 + 5070, sm_120)
+# NOTE: no --no-cache-dir here — pip needs its cache to resume multi-GB downloads
+RUN pip3 install --resume-retries 50 \
+    torch==2.10.0+cu128 \
+    torchvision==0.25.0+cu128 \
+    torchaudio==2.10.0+cu128 \
+    --index-url https://download.pytorch.org/whl/cu128
 
 # Setup Jupyter Lab configuration
 RUN jupyter lab --generate-config && \

@@ -117,14 +117,24 @@ RAPP_LAB_04/
 
 ```bash
 # 4. Test inference offline:
-#    - 07_test_inference.ipynb         → Test with rosbag playback
+#    - 04_inference_test.ipynb         → Test pipeline with recorded data
 
-# 5. Deploy to robot:
+# 5. Build the ROS2 inference node (inside container):
 docker exec -it rapp_vam bash
 cd /workspace/ros2_ws
-colcon build --packages-select vam_inference
+pip install setuptools==58.2.0          # required for --symlink-install
+colcon build --symlink-install
 source install/setup.bash
+
+# 6a. Launch node only (headless / real robot):
 ros2 launch vam_inference vam_inference.launch.py
+
+# 6b. Launch with RViz visualisation (node + robot model + RViz):
+ros2 launch vam_inference vam_rviz.launch.py
+
+# 6c. Replay a rosbag for offline testing:
+ros2 bag play /data/rosbags/<name> --clock &
+ros2 launch vam_inference vam_rviz.launch.py use_sim_time:=true
 ```
 
 ## Container Management
@@ -293,6 +303,7 @@ pytest tests/ -v
 ```bash
 docker exec -it rapp_vam bash
 cd /workspace/ros2_ws
+pip install setuptools==58.2.0    # one-time fix for --symlink-install
 colcon build --symlink-install
 source install/setup.bash
 ```
