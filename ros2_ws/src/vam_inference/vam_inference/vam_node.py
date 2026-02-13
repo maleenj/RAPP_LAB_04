@@ -2,11 +2,15 @@
 
 Subscribes to ZED skeleton tracking and UR10 joint states, runs the trained
 Action Chunking Transformer through the temporal ensemble pipeline, and
-publishes smooth joint trajectory commands.
+publishes smooth joint commands.
 
 Modes:
     rviz  — publish JointState on /vam/joint_states for RViz visualization
-    robot — additionally send FollowJointTrajectory goals to the UR10 controller
+    robot — stream joint velocity commands to MoveIt Servo via JointJog
+
+Robot mode requires:
+    1. forward_position_controller active (MoveIt Servo publishes to it)
+    2. MoveIt Servo running (from ur_moveit_config)
 """
 
 import sys
@@ -21,12 +25,10 @@ from rclpy.qos import (
     QoSHistoryPolicy,
     QoSDurabilityPolicy,
 )
-from rclpy.action import ActionClient
 from rclpy.time import Time
-from builtin_interfaces.msg import Duration
+from control_msgs.msg import JointJog
 from sensor_msgs.msg import JointState
-from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
-from control_msgs.action import FollowJointTrajectory
+from std_msgs.msg import Int8
 from zed_msgs.msg import ObjectsStamped
 
 import tf2_ros
@@ -79,12 +81,14 @@ class VAMInferenceNode(Node):
         self.declare_parameter("target_skeleton_id", -1)
         self.declare_parameter("tracking_timeout_sec", 0.5)
         self.declare_parameter("trajectory_lookahead_frames", 5)
+        self.declare_parameter("servo_proportional_gain", 5.0)
 
         # --- Read parameters ---
         self._mode = self.get_parameter("mode").value
         self._target_skeleton_id = self.get_parameter("target_skeleton_id").value
         self._tracking_timeout = self.get_parameter("tracking_timeout_sec").value
         self._lookahead = self.get_parameter("trajectory_lookahead_frames").value
+        self._servo_gain = self.get_parameter("servo_proportional_gain").value
 
         # --- Build inference config from parameters ---
         config = InferenceConfig(
@@ -129,7 +133,8 @@ class VAMInferenceNode(Node):
         self._skeleton_stamp: Time | None = None
         self._joints_stamp: Time | None = None
         self._pipeline_active = False
-        self._frames_since_trajectory = 0
+        self._safety_seeded = False
+        self._last_target: np.ndarray | None = None  # for feedforward
 
         # --- TF2 for coordinate transforms ---
         self._tf_buffer = tf2_ros.Buffer()
@@ -160,17 +165,22 @@ class VAMInferenceNode(Node):
             JointState, "/vam/joint_states", 10
         )
 
-        # --- Action client (robot mode) ---
-        self._trajectory_client = None
+        # --- MoveIt Servo JointJog publisher (robot mode) ---
+        # Publishes joint velocity commands to MoveIt Servo, which handles
+        # interpolation (250Hz), collision checking, and streaming to
+        # forward_position_controller.
+        self._jog_pub = None
         if self._mode == "robot":
-            self._trajectory_client = ActionClient(
-                self,
-                FollowJointTrajectory,
-                "/scaled_joint_trajectory_controller/follow_joint_trajectory",
+            self._jog_pub = self.create_publisher(
+                JointJog, "/servo_node/delta_joint_cmds", 10
             )
-            self.get_logger().info("Waiting for trajectory action server...")
-            self._trajectory_client.wait_for_server(timeout_sec=10.0)
-            self.get_logger().info("Trajectory action server connected.")
+            self._servo_status_sub = self.create_subscription(
+                Int8, "/servo_node/status", self._servo_status_cb, 10
+            )
+            self.get_logger().info(
+                f"MoveIt Servo mode: publishing JointJog to /servo_node/delta_joint_cmds "
+                f"(Kp={self._servo_gain}). Ensure MoveIt Servo is running."
+            )
 
         # --- 15 Hz timer ---
         self._timer = self.create_timer(1.0 / 15.0, self._timer_cb)
@@ -247,10 +257,18 @@ class VAMInferenceNode(Node):
                 self.get_logger().warn(
                     f"Skeleton tracking lost ({skeleton_age:.1f}s), holding position"
                 )
+                if self._mode == "robot":
+                    self._hold_position()
                 self._pipeline_active = False
             return
 
         self._pipeline_active = True
+
+        # Seed safety checker with actual robot position on first active frame
+        if not self._safety_seeded and self._latest_joints is not None:
+            self._safety.seed(self._latest_joints)
+            self._safety_seeded = True
+            self.get_logger().info("SafetyChecker seeded with current robot position")
 
         # Feed frame to assembler
         self._assembler.add_frame(self._latest_skeleton, self._latest_joints)
@@ -272,17 +290,14 @@ class VAMInferenceNode(Node):
 
             if report.warnings:
                 for w in report.warnings[:1]:  # log at most 1 per frame
-                    self.get_logger().debug(w)
+                    self.get_logger().warn(w)
 
             # Publish predicted joint state (always, for RViz)
             self._publish_joint_state(report.target)
 
-            # Send trajectory to robot controller
+            # Stream to robot controller (every frame for smooth motion)
             if self._mode == "robot":
-                self._frames_since_trajectory += 1
-                if self._frames_since_trajectory >= self._lookahead:
-                    self._send_trajectory_goal()
-                    self._frames_since_trajectory = 0
+                self._stream_to_robot(report.target)
 
         self._ensemble.step()
 
@@ -357,40 +372,59 @@ class VAMInferenceNode(Node):
         msg.position = joint_angles.tolist()
         self._joint_state_pub.publish(msg)
 
-    def _send_trajectory_goal(self) -> None:
-        """Send a FollowJointTrajectory goal with lookahead points."""
-        if self._trajectory_client is None:
+    def _hold_position(self) -> None:
+        """Command the robot to hold its current position.
+
+        Publishes zero-velocity JointJog so MoveIt Servo stops motion.
+        Servo also auto-halts after its incoming_command_timeout (0.1s).
+        """
+        if self._jog_pub is None:
             return
-        if self._ensemble.num_predictions == 0:
+        msg = JointJog()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = "base_link"
+        msg.joint_names = list(UR10_JOINT_NAMES)
+        msg.velocities = [0.0] * 6
+        self._jog_pub.publish(msg)
+
+    def _stream_to_robot(self, target: np.ndarray) -> None:
+        """Stream joint velocity commands to MoveIt Servo.
+
+        Computes velocity via P-controller + feedforward:
+            v = Kp * (target - current) + (target - last_target) / dt
+
+        The feedforward term anticipates target motion so the robot doesn't
+        lag behind. MoveIt Servo handles interpolation (250Hz), collision
+        checking, and streaming to forward_position_controller.
+        """
+        if self._jog_pub is None or self._latest_joints is None:
             return
 
-        # Get multi-point trajectory from ensemble
-        trajectory = self._ensemble.query_trajectory(self._lookahead)
+        # P-controller: corrects tracking error
+        error = target - self._latest_joints
+        velocities = self._servo_gain * error
 
-        # Apply safety to each point
-        safe_points = []
-        # Use a temporary safety checker so we don't corrupt the main one's state
-        for i in range(len(trajectory)):
-            safe_points.append(trajectory[i])
+        # Feedforward: anticipates target motion (eliminates steady-state lag)
+        if self._last_target is not None:
+            dt = 1.0 / 15.0
+            feedforward = (target - self._last_target) / dt
+            velocities = velocities + feedforward
 
-        # Build JointTrajectory message
-        traj_msg = JointTrajectory()
-        traj_msg.header.stamp = self.get_clock().now().to_msg()
-        traj_msg.joint_names = list(UR10_JOINT_NAMES)
+        self._last_target = target.copy()
 
-        dt = 1.0 / 15.0
-        for i, point_joints in enumerate(safe_points):
-            pt = JointTrajectoryPoint()
-            pt.positions = point_joints.tolist()
-            sec = int((i + 1) * dt)
-            nanosec = int(((i + 1) * dt - sec) * 1e9)
-            pt.time_from_start = Duration(sec=sec, nanosec=nanosec)
-            traj_msg.points.append(pt)
+        msg = JointJog()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = "base_link"
+        msg.joint_names = list(UR10_JOINT_NAMES)
+        msg.velocities = velocities.tolist()
+        self._jog_pub.publish(msg)
 
-        # Send goal
-        goal = FollowJointTrajectory.Goal()
-        goal.trajectory = traj_msg
-        self._trajectory_client.send_goal_async(goal)
+    def _servo_status_cb(self, msg: Int8) -> None:
+        """Log MoveIt Servo status warnings."""
+        if msg.data != 0:
+            self.get_logger().warn(
+                f"MoveIt Servo status: {msg.data}", throttle_duration_sec=2.0
+            )
 
 
 def main(args=None):
@@ -399,7 +433,9 @@ def main(args=None):
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        pass
+        node.get_logger().info("Shutdown requested, holding position...")
+        if node._mode == "robot":
+            node._hold_position()
     finally:
         node.destroy_node()
         rclpy.shutdown()

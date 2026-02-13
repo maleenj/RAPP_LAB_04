@@ -25,6 +25,7 @@ def generate_launch_description():
             DeclareLaunchArgument("max_joint_acceleration_rad_s2", default_value="5.0"),
             DeclareLaunchArgument("target_skeleton_id", default_value="-1"),
             DeclareLaunchArgument("tracking_timeout_sec", default_value="0.5"),
+            DeclareLaunchArgument("trajectory_lookahead_frames", default_value="5"),
             DeclareLaunchArgument("use_sim_time", default_value="false"),
 
             # --- VAM inference node ---
@@ -46,6 +47,7 @@ def generate_launch_description():
                         "max_joint_acceleration_rad_s2": LaunchConfiguration("max_joint_acceleration_rad_s2"),
                         "target_skeleton_id": LaunchConfiguration("target_skeleton_id"),
                         "tracking_timeout_sec": LaunchConfiguration("tracking_timeout_sec"),
+                        "trajectory_lookahead_frames": LaunchConfiguration("trajectory_lookahead_frames"),
                         "use_sim_time": LaunchConfiguration("use_sim_time"),
                     }
                 ],

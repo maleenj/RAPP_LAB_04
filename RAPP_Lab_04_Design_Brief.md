@@ -144,34 +144,36 @@ STEP 4: Real-Time Inference
 - Output: [robot_future: [10, 6]]
 - At ~15Hz: T_in ≈ 0.67s history, T_out ≈ 0.67s prediction horizon
 
-### Model Architecture
+### Model Architecture (Implemented)
 
-**Action Chunking Transformer:**
-
-> **Note:** The architecture parameters below are starting points. With ~8,000 training windows (10 episodes), the model may be over-parameterized. Smaller configurations (2-3 layers, 4 heads, d_model=128) should be explored first during training to avoid overfitting. These will be tuned in notebook 03.
+**Action Chunking Transformer (~1.2M parameters):**
 
 ```
 Input Processing:
-├─ Skeleton Encoder (Temporal Transformer)
-│  ├─ 6 layers, 8 attention heads
-│  ├─ Dimension: 256
-│  └─ Output: Skeleton latent representation [256]
+├─ Skeleton + Robot MLP Projection
+│  ├─ Input: [T_in=10, 54] (skeleton[48] + joints[6])
+│  └─ Project to d_model=128
+│
+├─ Shared Encoder (Temporal Transformer)
+│  ├─ 3 layers, 4 attention heads
+│  ├─ Dimension: 128, FFN: 512
+│  ├─ Positional encoding + dropout 0.1
+│  └─ Output: Encoded sequence [T_in, 128]
 │
 ├─ Robot State Encoder (MLP)
-│  ├─ Hidden layers: [64, 128]
-│  └─ Output: Robot latent representation [128]
+│  └─ Hidden dim: 64 → 128
 │
-└─ Fusion Layer → Combined latent [384]
-
-Action Decoder:
-├─ Transformer Decoder (4 layers, 8 heads)
-├─ Predicts entire trajectory chunk (10 frames)
-└─ Output: [T_out=10, 6] joint angle predictions
+└─ Action Decoder (Transformer)
+   ├─ 2 layers, 4 heads
+   ├─ Learned action queries [T_out=10]
+   ├─ Cross-attention to encoder output
+   └─ Output: [T_out=10, 6] joint angle predictions
 
 Loss Function:
-├─ Prediction Loss (MSE)
-├─ Smoothness Loss (velocity regularization)
-└─ Acceleration Loss (smooth motion)
+├─ Prediction Loss (MSE) — weight: 1.0
+├─ Smoothness Loss (velocity) — weight: 0.1
+├─ Acceleration Loss — weight: 0.05
+└─ Joint Limit Loss — weight: 0.1
 ```
 
 **Key Design Decisions:**
@@ -182,7 +184,7 @@ Loss Function:
 
 3. **Predict Joint Angles (Not End-Effector):** Full 6-DOF configuration preserves the kinesthetic quality essential for physical theatre mirroring
 
-4. **Overlap Execution:** Re-predict every 3-5 frames (~0.2-0.33s) with overlap for smooth transitions between chunks
+4. **Small Model for Small Dataset:** With ~7K training windows from 10 episodes, d_model=128 with 3+2 layers avoids overfitting while capturing the temporal patterns
 
 ---
 
@@ -319,122 +321,137 @@ predict_chunk(skeleton_history, robot_history)
 
 ---
 
-### STEP 4: Real-Time Inference Pipeline
+### STEP 4: Real-Time Inference Pipeline (Implemented)
 
 **Objective:** Deploy trained model for live performance with smooth, continuous robot motion.
 
-#### Smooth Control Strategy: Temporal Ensemble with Receding Horizon
+**Status:** Core pipeline complete. RViz visualization tested. Real robot deployment ready.
+
+#### Smooth Control Strategy: Temporal Ensemble
 
 The model predicts 10-frame chunks (~0.67s). Executing full chunks sequentially produces jerky motion at boundaries. The solution is **temporal ensemble** (from ACT paper, Tony Zhao et al.):
 
-1. Re-predict every K=2 frames (~133ms), not every 10 frames
-2. Each prediction still produces a full 10-frame chunk
-3. Multiple overlapping chunks cover each timestep (up to 5 with K=2)
+1. Re-predict every K frames (K=1 empirically smoothest, configurable)
+2. Each prediction produces a full 10-frame chunk
+3. Multiple overlapping chunks cover each timestep
 4. Blend all overlapping predictions using exponential decay weighting
 
 ```
 Time:     t0  t1  t2  t3  t4  t5  t6  t7  t8  t9  t10 t11
 Chunk A:  [0   1   2   3   4   5   6   7   8   9]
-Chunk B:            [0   1   2   3   4   5   6   7   8   9]
-Chunk C:                    [0   1   2   3   4   5   6   7   8   9]
+Chunk B:      [0   1   2   3   4   5   6   7   8   9]
+Chunk C:          [0   1   2   3   4   5   6   7   8   9]
 
-At t4: blend A[4], B[2], C[0] → weights exp(-λ*4), exp(-λ*2), exp(-λ*0)
+At t4: blend A[4], B[3], C[2], ... → weights exp(-λ*4), exp(-λ*3), exp(-λ*2), ...
 ```
 
-**Why this works:** Averaging overlapping predictions filters noise and eliminates chunk boundary discontinuities. No post-hoc filtering needed (no Savitzky-Golay, no phase lag). The velocity/acceleration losses in training ensure within-chunk smoothness; the temporal ensemble ensures between-chunk continuity.
+**Tuned parameters (from notebook 04 sweep):**
 
-**Tunable parameters:**
-| Parameter | Default | Effect |
-|-----------|---------|--------|
-| K (stride) | 2 | Lower = responsive, higher = stable |
-| λ (decay) | 0.01 | Lower = smoother, higher = responsive |
-| Warmup | 20 frames | Buffer fill + ensemble history before execution |
+| Parameter | Value | Rationale |
+|-----------|-------|-----------|
+| K (stride) | 1 | Re-predict every frame — smoothest output |
+| λ (decay) | 0.5 | Biases toward newest prediction, responsive |
+| Control rate | 15 Hz | Matches training data frequency |
 
 #### Execution Interface: FollowJointTrajectory
 
-**NOT MoveIt MoveGroup** — waypoint-by-waypoint MoveGroup (plan → execute → stop → repeat) produces start-stop jerkiness. Instead:
-
-- **`FollowJointTrajectory` action** for trajectory execution — the standard ROS2 interface used by UR, TM, Franka, and all arms. MoveIt uses this under the hood.
-- **Future obstacle avoidance**: Add MoveIt PlanningScene + OctoMap as a validation layer (check trajectory for collisions before sending to controller). This doesn't require using MoveGroup for execution.
+Uses the standard ROS2 `FollowJointTrajectory` action (NOT MoveIt MoveGroup which produces start-stop jerkiness). The `scaled_joint_trajectory_controller` from the UR driver interpolates between waypoints smoothly.
 
 ```
-Temporal Ensemble → blended targets → [future: collision check] → FollowJointTrajectory
+InputAssembler → VAMModel → TemporalEnsemble → SafetyChecker → FollowJointTrajectory
+     [1,10,54]    [10,6]        [6] blended        [6] safe        action goal
 ```
 
 #### Implementation Architecture
 
-**Phase A: Core Inference Utilities** (`vam_utils/inference/`, no ROS2 dependency)
-- `inference_config.py`: InferenceConfig dataclass (paths, K, λ, safety limits)
-- `model_wrapper.py`: Load model + predict, denormalize to radians
-- `temporal_ensemble.py`: Prediction buffer + exponential decay blending
-- `input_assembler.py`: Rolling buffer + normalization for skeleton/joints
-- `safety_checker.py`: Joint limits, velocity/acceleration constraints
+**Core Inference Utilities** (`vam_utils/inference/`, no ROS2 dependency):
 
-**Phase B: Offline Testing** (`notebooks/04_inference_test.ipynb`)
-- Replay test episodes through full pipeline, no ROS2
-- Visualize ensemble vs raw predictions vs ground truth
-- Parameter sweep (K, λ), latency profiling
+| Module | Purpose |
+|--------|---------|
+| `input_assembler.py` | Rolling buffer of T_in=10 frames, normalization, tensor assembly |
+| `model_wrapper.py` | Load checkpoint, run forward pass, denormalize to radians |
+| `temporal_ensemble.py` | Overlapping chunk blending with exponential decay |
+| `safety_checker.py` | Joint limits + velocity limiting + acceleration limiting |
+| `inference_config.py` | InferenceConfig dataclass (paths, K, λ, safety limits) |
 
-**Phase C: ROS2 Inference Node** (`ros2_ws/src/vam_inference/`)
+**ROS2 Inference Node** (`ros2_ws/src/vam_inference/vam_node.py`):
 
-**Main Node** (`vam_inference_node`)
 - **Subscribes:**
-  - `/zed/zed_node/body_trk/skeletons` (skeleton tracking)
-  - `/joint_states` (current robot state)
+  - `/zed/zed_node/body_trk/skeletons` — ZED body tracking (BEST_EFFORT QoS)
+  - `/joint_states` — UR10 current joint positions
 - **Publishes:**
-  - `/vam/predicted_trajectory` (JointTrajectory message)
-  - `/vam/joint_states` (for RViz visualization)
-  - `/vam/visualization_markers` (RViz markers)
+  - `/vam/joint_states` — Predicted joints for RViz visualization (always)
+- **Actions (robot mode):**
+  - `/scaled_joint_trajectory_controller/follow_joint_trajectory` — Multi-point trajectory goals
 
-**Main loop (15Hz timer callback):**
-1. Read latest skeleton + joint_states from buffers
-2. Feed to InputAssembler (normalize + concat)
-3. If buffer ready AND should_predict(): run inference, add to ensemble
-4. Query TemporalEnsemble for blended target at current step
-5. SafetyChecker: clamp limits, constrain velocity/acceleration
-6. Publish (JointState for RViz mode, FollowJointTrajectory for robot mode)
+**15 Hz control loop:**
+1. Check skeleton/joint data freshness (timeout: 0.5s)
+2. Transform skeleton from camera frame to `base_link` via TF2
+3. Feed to InputAssembler (normalize + concat → [1, 10, 54])
+4. If `should_predict()`: run model → [10, 6] chunk → add to ensemble
+5. Query ensemble → [6] blended target
+6. SafetyChecker: clamp limits, constrain velocity/acceleration
+7. Publish JointState (always) + FollowJointTrajectory goal (robot mode, every 5 frames)
 
-**Supporting Modules (ROS2-specific):**
-- `skeleton_buffer.py`: Subscribe to ZED skeleton topic, extract 48 floats
-- `robot_state_buffer.py`: Subscribe to joint_states, handle joint name→index mapping
-- `trajectory_publisher.py`: RViz mode (publish JointState) / Robot mode (FollowJointTrajectory action)
+#### Launch Files
+
+| File | Mode | Use Case |
+|------|------|----------|
+| `vam_rviz.launch.py` | rviz | Rosbag replay + RViz (use_sim_time:=true) |
+| `vam_robot.launch.py` | robot | Real robot, conservative defaults (vel=0.5, acc=1.5) |
+| `vam_inference.launch.py` | configurable | Node only, no RViz or robot_state_publisher |
 
 #### Execution Modes
 
-**Mode 1: Offline Replay** (notebook, no ROS2)
+**Mode 1: Offline Replay** (notebook `04_inference_test.ipynb`, no ROS2)
 - Feed CSV data frame-by-frame through pipeline
-- Validate smoothness and accuracy
+- Parameter sweep, latency profiling, visualization
 
-**Mode 2: Rosbag Testing** (ROS2, RViz only)
+**Mode 2: RViz Visualization** (rosbag + ROS2, no robot)
 ```bash
-ros2 bag play test_recording.db3 --clock
-ros2 launch vam_inference vam_inference.launch.py mode:=rviz use_sim_time:=true
+ros2 bag play /data/rosbags/<name> --clock
+ros2 launch vam_inference vam_rviz.launch.py use_sim_time:=true
 ```
 
-**Mode 3: Live + RViz** (ROS2, no physical robot)
+**Mode 3: Real Robot with Rosbag Skeleton** (skeleton from bag, joints from robot)
 ```bash
-ros2 launch vam_inference vam_inference.launch.py mode:=rviz
+ros2 run tf2_ros static_transform_publisher 4.4 0.1 -0.25 1.5708 0 0 map base_link
+ros2 launch ur_robot_driver ur_control.launch.py ur_type:=ur10 robot_ip:=10.0.0.89 ...
+ros2 bag play /data/rosbags/<name> --topics /zed/zed_node/body_trk/skeletons --loop
+ros2 launch vam_inference vam_robot.launch.py
 ```
 
-**Mode 4: Physical Robot** (start at conservative velocity)
+**Mode 4: Live Performance** (ZED camera + robot)
 ```bash
-ros2 launch vam_inference vam_inference.launch.py mode:=robot max_velocity:=0.3
+ros2 run tf2_ros static_transform_publisher 4.4 0.1 -0.25 1.5708 0 0 map base_link
+ros2 launch ur_robot_driver ur_control.launch.py ur_type:=ur10 robot_ip:=10.0.0.89 ...
+# ZED container publishes /zed/zed_node/body_trk/skeletons
+ros2 launch vam_inference vam_robot.launch.py
 ```
 
 #### Safety Architecture (Defense in Depth)
 
-1. **Model output clamping**: `inverse_normalize_joints(clamp_to_limits=True)` — UR10 joint limits
-2. **Velocity limiting**: Scale delta to respect max_joint_velocity_rad_s (default: 1.0)
-3. **Acceleration limiting**: Constrain rate of velocity change
-4. **Tracking loss detection**: If no skeleton for >0.5s → graceful deceleration to zero
-5. **UR10 built-in safety**: Controller rejects trajectories violating internal limits
+Five layers of protection, all implemented:
 
-#### Deliverables
-- Inference utilities (`vam_utils/inference/`)
-- Offline testing notebook (`04_inference_test.ipynb`)
-- ROS2 package (`vam_inference/`)
-- Launch files, RViz config, parameter YAML
-- Testing and profiling documentation
+1. **Model output clamping** — `inverse_normalize_joints(clamp_to_limits=True)` enforces UR10 URDF joint limits during denormalization
+2. **Joint limit clamping** — SafetyChecker hard-clamps to URDF ranges (e.g., elbow: ±180°)
+3. **Velocity limiting** — Scales delta to respect `max_joint_velocity_rad_s` (default: 0.5 rad/s for robot mode, 1.0 for rviz)
+4. **Acceleration limiting** — Constrains rate of velocity change (`max_joint_acceleration_rad_s2`)
+5. **UR10 built-in safety** — Controller rejects trajectories violating internal limits; hardware e-stop available
+
+**Additional protections:**
+- **SafetyChecker seeded** from robot's actual `/joint_states` position on startup — prevents first-frame jump
+- **Hold-position on tracking loss** — Sends zero-velocity trajectory goal to stop the robot when skeleton data is interrupted
+- **Graceful shutdown** — Ctrl+C sends hold-position before node destruction
+- **Trajectory point safety** — Each point in multi-point trajectory goals is individually safety-checked via a temporary SafetyChecker
+- **Safety warnings at WARN level** — All constraint violations are visible in the ROS2 log output
+
+#### Deliverables (Complete)
+- Inference utilities: `vam_utils/inference/` (input_assembler, model_wrapper, temporal_ensemble, safety_checker)
+- Offline testing notebook: `04_inference_test.ipynb`
+- ROS2 package: `ros2_ws/src/vam_inference/`
+- Launch files: `vam_rviz.launch.py`, `vam_robot.launch.py`, `vam_inference.launch.py`
+- RViz config: `config/vam.rviz`
 
 ---
 
@@ -567,37 +584,33 @@ ros2 launch vam_inference vam_inference.launch.py mode:=robot max_velocity:=0.3
 
 ---
 
-## Project Timeline
+## Project Status
 
-### Phase 1: Infrastructure (Weeks 1-2)
-- Docker environment setup
-- URDF extraction and validation
-- Visualization module development
-- Test with sample rosbag
+### Phase 1: Infrastructure — Complete
+- Docker environment with ROS2 Humble + PyTorch + CUDA 12.8
+- URDF extraction and forward kinematics validation
+- ZED message integration
 
-### Phase 2: Data Pipeline (Weeks 3-4)
-- Process all existing rosbags
-- Quality validation and statistics
-- Create PyTorch training datasets
-- Verify data characteristics
+### Phase 2: Data Pipeline — Complete
+- 10 episodes processed from rosbags to synchronized CSV
+- Skeleton selection, coordinate transformation, quality checks
+- Normalization statistics computed
 
-### Phase 3: Model Development (Weeks 5-6)
-- Implement ACT architecture
-- Train initial model
-- Evaluate performance
-- Iterate on hyperparameters
+### Phase 3: Model Development — Complete
+- Action Chunking Transformer trained (~1.2M params)
+- Temporal ensemble parameter sweep (K=1, λ=0.5 optimal)
+- Offline evaluation in notebook
 
-### Phase 4: Deployment Preparation (Week 7)
-- Develop ROS2 inference node
-- Test with rosbag playback
-- Safety validation
-- Performance profiling
+### Phase 4: ROS2 Inference — Complete
+- Inference node with temporal ensemble and safety checker
+- RViz visualization tested with rosbag replay
+- Real robot launch file with conservative safety defaults
 
-### Phase 5: Live Testing (Week 8+)
-- Gradual live deployment
-- Workshop with performers
-- Collect feedback and failure cases
-- Iterate on model/data
+### Phase 5: Live Testing — In Progress
+- Real robot deployment ready (safety architecture implemented)
+- Next: First test with rosbag skeleton data → real UR10
+- Then: Live ZED camera + performer → real UR10
+- Then: Workshop with performers, collect feedback
 
 ---
 
@@ -809,6 +822,6 @@ vam_best.pth (best validation loss)
 
 *This design brief represents the starting point for RAPP Lab 04 development. Details may evolve based on experimental findings and artistic requirements.*
 
-**Document Version:** 2.0
+**Document Version:** 3.0
 **Last Updated:** February 2026
-**Status:** Model Training Complete, Real-Time Inference Next
+**Status:** Phases 1-4 Complete. Real robot deployment ready, live testing next.

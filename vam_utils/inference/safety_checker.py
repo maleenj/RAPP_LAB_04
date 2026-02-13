@@ -119,6 +119,19 @@ class SafetyChecker:
             target=target, warnings=warnings, was_constrained=was_constrained
         )
 
+    def seed(self, position: np.ndarray) -> None:
+        """Initialize safety state with the robot's current position.
+
+        Call this BEFORE the first check() so that the very first prediction
+        is velocity/acceleration-limited relative to where the robot actually
+        is, preventing a sudden jump.
+
+        Args:
+            position: [6] current joint angles in radians (from /joint_states).
+        """
+        self._last_position = position.copy().astype(np.float32)
+        self._last_velocity = np.zeros(6, dtype=np.float32)
+
     def reset(self) -> None:
         """Clear state (call when restarting inference)."""
         self._last_position = None
