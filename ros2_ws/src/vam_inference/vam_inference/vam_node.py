@@ -117,10 +117,13 @@ class VAMInferenceNode(Node):
             K=config.prediction_stride_K,
             decay_weight=config.ensemble_decay_weight,
         )
+        # In robot mode, MoveIt Servo handles velocity/acceleration/collision
+        # safety — SafetyChecker only does joint limit clamping.
         self._safety = SafetyChecker(
             max_joint_velocity_rad_s=config.max_joint_velocity_rad_s,
             max_joint_acceleration_rad_s2=config.max_joint_acceleration_rad_s2,
             dt=config.frame_dt,
+            joint_limits_only=(self._mode == "robot"),
         )
         self.get_logger().info(
             f"Model loaded. Mode={self._mode}, K={config.prediction_stride_K}, "

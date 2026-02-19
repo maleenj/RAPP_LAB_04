@@ -19,6 +19,10 @@ Prerequisites (run in separate terminals):
           strictness: 2}"
 
     # 3. MoveIt Servo (from ZED container — has moveit packages)
+    #    First, copy our tuned servo config (less Butterworth smoothing):
+    docker cp ros2_ws/src/vam_inference/config/ur_servo_vam.yaml \\
+        <zed_container>:/opt/ros/humble/share/ur_moveit_config/config/ur_servo.yaml
+    #    Then launch Servo:
     ros2 launch ur_moveit_config ur_moveit.launch.py \\
         ur_type:=ur10 launch_servo:=true launch_rviz:=false
 
@@ -111,9 +115,10 @@ def generate_launch_description():
             DeclareLaunchArgument("trajectory_lookahead_frames", default_value="5"),
             DeclareLaunchArgument(
                 "servo_proportional_gain",
-                default_value="5.0",
+                default_value="12.0",
                 description="P-controller gain for JointJog velocity computation. "
-                "v = Kp * (target - current). Lower = slower tracking.",
+                "v = Kp * (target - current). Lower = slower tracking. "
+                "12.0 gives ~2Hz tracking bandwidth.",
             ),
             DeclareLaunchArgument("use_sim_time", default_value="false"),
 

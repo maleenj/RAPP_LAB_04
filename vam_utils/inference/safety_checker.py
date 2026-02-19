@@ -43,17 +43,21 @@ class SafetyChecker:
         max_joint_velocity_rad_s: float = 1.0,
         max_joint_acceleration_rad_s2: float = 5.0,
         dt: float = 1.0 / 15.0,
+        joint_limits_only: bool = False,
     ):
         """
         Args:
             max_joint_velocity_rad_s: per-joint velocity limit.
             max_joint_acceleration_rad_s2: per-joint acceleration limit.
             dt: time between control steps (1/control_rate_hz).
+            joint_limits_only: if True, skip velocity/acceleration limiting.
+                Use when MoveIt Servo handles dynamic safety.
         """
         self.joint_limits = np.array(UR10_JOINT_LIMITS, dtype=np.float32)  # [6, 2]
         self.max_vel = max_joint_velocity_rad_s
         self.max_acc = max_joint_acceleration_rad_s2
         self.dt = dt
+        self.joint_limits_only = joint_limits_only
         self._last_position: Optional[np.ndarray] = None
         self._last_velocity: Optional[np.ndarray] = None
 
@@ -77,6 +81,13 @@ class SafetyChecker:
             warnings.append(f"Joint limit clamp on joints {violations.tolist()}")
             target = clamped
             was_constrained = True
+
+        # Skip velocity/acceleration limiting when MoveIt Servo handles safety
+        if self.joint_limits_only:
+            self._last_position = target.copy()
+            return SafetyReport(
+                target=target, warnings=warnings, was_constrained=was_constrained
+            )
 
         # 2. Velocity limiting
         if self._last_position is not None:

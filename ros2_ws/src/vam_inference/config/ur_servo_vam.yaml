@@ -1,0 +1,76 @@
+###############################################
+# MoveIt Servo config for VAM inference on UR10
+#
+# Based on ur_moveit_config/config/ur_servo.yaml with tuning for
+# responsive model-driven tracking while keeping collision safety.
+#
+# Key changes from stock config:
+#   - low_pass_filter_coeff: 2.0 (was 10.0) — less smoothing for faster response
+#   - publish_period: 0.004 (250Hz, unchanged)
+#   - collision checking: enabled (unchanged)
+###############################################
+use_gazebo: false
+
+## Properties of incoming commands
+command_in_type: "speed_units" # Our JointJog velocities are in rad/s
+scale:
+  # Scale parameters are only used if command_in_type=="unitless"
+  linear:  0.6
+  rotational:  0.3
+  joint: 0.01
+
+system_latency_compensation: 0.04
+
+## Properties of outgoing commands
+publish_period: 0.004  # 250 Hz
+low_latency_mode: false
+
+command_out_type: std_msgs/Float64MultiArray
+
+publish_joint_positions: true
+publish_joint_velocities: false
+publish_joint_accelerations: false
+
+## Smoothing filter — Butterworth low-pass on outgoing commands
+smoothing_filter_plugin_name: "online_signal_smoothing::ButterworthFilterPlugin"
+
+is_primary_planning_scene_monitor: false
+
+## Incoming Joint State filtering
+# Lower = less smoothing = more responsive to actual joint state changes.
+# Stock ur_servo.yaml uses 10.0 (very smooth but laggy).
+# 2.0 passes more high-frequency content for faster tracking.
+low_pass_filter_coeff: 2.0
+
+## MoveIt properties
+move_group_name: ur_manipulator
+planning_frame: base_link
+
+## Other frames
+ee_frame_name: tool0
+robot_link_command_frame: tool0
+
+## Stopping behaviour
+incoming_command_timeout: 0.1  # Stop servoing if 100ms without new command
+num_outgoing_halt_msgs_to_publish: 4
+
+## Singularity and joint limits
+lower_singularity_threshold: 100.0
+hard_stop_singularity_threshold: 200.0
+joint_limit_margin: 0.1  # [radians] buffer from limits
+
+## Topic names
+cartesian_command_in_topic: ~/delta_twist_cmds
+joint_command_in_topic: ~/delta_joint_cmds
+joint_topic: /joint_states
+status_topic: ~/status
+command_out_topic: /forward_position_controller/commands
+
+## Collision checking
+check_collisions: true
+collision_check_rate: 5.0  # [Hz]
+collision_check_type: threshold_distance
+self_collision_proximity_threshold: 0.01  # [m]
+scene_collision_proximity_threshold: 0.02  # [m]
+collision_distance_safety_factor: 1000.0
+min_allowable_collision_distance: 0.01  # [m]

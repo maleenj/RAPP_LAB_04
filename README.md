@@ -135,12 +135,14 @@ ros2 service call /controller_manager/switch_controller \
       strictness: 2}"
 
 # Terminal 3: MoveIt Servo (from ZED container)
+#   First, copy tuned servo config (one-time, reduces Butterworth smoothing):
+docker cp ros2_ws/src/vam_inference/config/ur_servo_vam.yaml \
+    <zed_container>:/opt/ros/humble/share/ur_moveit_config/config/ur_servo.yaml
+#   Then launch Servo:
 ros2 launch ur_moveit_config ur_moveit.launch.py \
     ur_type:=ur10 launch_servo:=true launch_rviz:=false
-
-     ros2 service call /servo_node/start_servo std_srvs/srv/Trigger {}
-
-
+#   Start servo (it launches paused):
+ros2 service call /servo_node/start_servo std_srvs/srv/Trigger {}
 
 # Terminal 4: Static transform — map → world (camera-to-robot, adjust for lab)
 ros2 run tf2_ros static_transform_publisher \
@@ -196,9 +198,9 @@ ros2 launch vam_inference vam_robot.launch.py
 
 | Parameter | Default (rviz) | Default (robot) | Description |
 |---|---|---|---|
-| `servo_proportional_gain` | — | 5.0 | P-controller gain for MoveIt Servo (lower = slower) |
-| `max_joint_velocity_rad_s` | 1.0 | 0.5 | SafetyChecker pre-filter velocity limit (rad/s) |
-| `max_joint_acceleration_rad_s2` | 5.0 | 1.5 | SafetyChecker pre-filter acceleration limit (rad/s²) |
+| `servo_proportional_gain` | — | 12.0 | P-controller gain for MoveIt Servo (lower = slower) |
+| `max_joint_velocity_rad_s` | 1.0 | 2.0 | SafetyChecker pre-filter velocity limit (rad/s) |
+| `max_joint_acceleration_rad_s2` | 5.0 | 8.0 | SafetyChecker pre-filter acceleration limit (rad/s²) |
 | `prediction_stride_K` | 1 | 1 | Re-predict every K frames |
 | `ensemble_decay_weight` | 0.5 | 0.5 | Temporal smoothing (lower = smoother) |
 | `tracking_timeout_sec` | 0.5 | 0.5 | Skeleton loss detection threshold |
@@ -216,11 +218,10 @@ Robot mode uses **MoveIt Servo** as the primary safety layer, with the VAM node'
 4. **Butterworth smoothing** — Low-pass filter eliminates high-frequency jitter
 5. **Auto-halt on timeout** — Stops robot if commands stop for >0.1s
 
-**SafetyChecker (pre-filter — 15Hz):**
+**SafetyChecker (pre-filter — 15Hz, joint_limits_only in robot mode):**
 
 1. **Joint limit clamping** — Hard URDF limits (e.g., elbow: ±180°)
-2. **Velocity limiting** — Caps max joint speed per step
-3. **Acceleration limiting** — Prevents sudden speed changes
+2. Velocity/acceleration limiting disabled in robot mode (MoveIt Servo handles this)
 
 Additional protections:
 
