@@ -132,3 +132,86 @@ class ActionChunkingTransformer(nn.Module):
     def count_parameters(self) -> int:
         """Total number of trainable parameters."""
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
+
+
+class SkeletonOnlyACT(nn.Module):
+    """Action Chunking Transformer — skeleton-only input variant.
+
+    Identical to ActionChunkingTransformer except:
+    - No robot_proj MLP (no joint angles in input)
+    - No additive fusion — skeleton embedding goes directly to encoder
+    - Input: [B, T_in, skeleton_dim=48] instead of [B, T_in, 54]
+    """
+
+    def __init__(self, config: ModelConfig):
+        super().__init__()
+        self.config = config
+
+        self.skeleton_proj = nn.Linear(config.skeleton_dim, config.d_model)
+        self.encoder_pos = nn.Embedding(config.T_in, config.d_model)
+
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=config.d_model,
+            nhead=config.n_heads,
+            dim_feedforward=config.d_ff,
+            dropout=config.dropout,
+            activation="gelu",
+            batch_first=True,
+            norm_first=True,
+        )
+        self.encoder = nn.TransformerEncoder(
+            encoder_layer,
+            num_layers=config.n_encoder_layers,
+            norm=nn.LayerNorm(config.d_model),
+        )
+
+        self.action_queries = nn.Embedding(config.T_out, config.d_model)
+
+        decoder_layer = nn.TransformerDecoderLayer(
+            d_model=config.d_model,
+            nhead=config.n_heads,
+            dim_feedforward=config.d_ff,
+            dropout=config.dropout,
+            activation="gelu",
+            batch_first=True,
+            norm_first=True,
+        )
+        self.decoder = nn.TransformerDecoder(
+            decoder_layer,
+            num_layers=config.n_decoder_layers,
+            norm=nn.LayerNorm(config.d_model),
+        )
+
+        self.output_proj = nn.Linear(config.d_model, config.joint_dim)
+        self._init_weights()
+
+    def _init_weights(self):
+        """Xavier uniform for linear layers, normal for embeddings."""
+        for name, param in self.named_parameters():
+            if param.dim() > 1:
+                nn.init.xavier_uniform_(param)
+            elif "bias" in name:
+                nn.init.zeros_(param)
+        nn.init.normal_(self.encoder_pos.weight, std=0.02)
+        nn.init.normal_(self.action_queries.weight, std=0.02)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x: [batch, T_in, skeleton_dim] — skeleton data only (48-dim)
+
+        Returns:
+            [batch, T_out, joint_dim] predicted future joint angles
+        """
+        B = x.shape[0]
+        skel_emb = self.skeleton_proj(x)
+        positions = torch.arange(self.config.T_in, device=x.device)
+        skel_emb = skel_emb + self.encoder_pos(positions)
+        memory = self.encoder(skel_emb)
+        queries = self.action_queries.weight.unsqueeze(0).expand(B, -1, -1)
+        decoded = self.decoder(queries, memory)
+        return self.output_proj(decoded)
+
+    def count_parameters(self) -> int:
+        """Total number of trainable parameters."""
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)

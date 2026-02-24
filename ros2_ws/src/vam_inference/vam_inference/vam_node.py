@@ -109,8 +109,11 @@ class VAMInferenceNode(Node):
         # --- Load model and create pipeline components ---
         self.get_logger().info("Loading VAM model...")
         self._model = VAMModelWrapper(config)
+        self._skeleton_only = self._model.skeleton_only
         self._assembler = InputAssembler(
-            norm_stats=self._model.norm_stats, T_in=10
+            norm_stats=self._model.norm_stats,
+            T_in=10,
+            skeleton_only=self._skeleton_only,
         )
         self._ensemble = TemporalEnsemble(
             T_out=10,
@@ -125,9 +128,10 @@ class VAMInferenceNode(Node):
             dt=config.frame_dt,
             joint_limits_only=(self._mode == "robot"),
         )
+        model_type_str = "skeleton_only" if self._skeleton_only else "skeleton+joints"
         self.get_logger().info(
-            f"Model loaded. Mode={self._mode}, K={config.prediction_stride_K}, "
-            f"lambda={config.ensemble_decay_weight}"
+            f"Model loaded ({model_type_str}). Mode={self._mode}, "
+            f"K={config.prediction_stride_K}, lambda={config.ensemble_decay_weight}"
         )
 
         # --- State ---
@@ -196,11 +200,28 @@ class VAMInferenceNode(Node):
     def _skeleton_cb(self, msg: ObjectsStamped) -> None:
         """Extract skeleton keypoints from ZED body tracking message."""
         if len(msg.objects) == 0:
+            self.get_logger().debug(
+                "Skeleton msg received but objects list is empty",
+                throttle_duration_sec=2.0,
+            )
             return
+
+        # Log skeleton IDs for diagnostics (once every 5s)
+        ids = [obj.label_id for obj in msg.objects]
+        self.get_logger().info(
+            f"Skeleton msg: frame_id='{msg.header.frame_id}', "
+            f"{len(msg.objects)} bodies, label_ids={ids}",
+            throttle_duration_sec=5.0,
+        )
 
         # Select skeleton
         obj = self._select_skeleton(msg.objects)
         if obj is None:
+            self.get_logger().warn(
+                f"target_skeleton_id={self._target_skeleton_id} not found "
+                f"in detected ids={ids}",
+                throttle_duration_sec=2.0,
+            )
             return
 
         # Extract 16 keypoints → [48] array
@@ -212,6 +233,11 @@ class VAMInferenceNode(Node):
 
         # Check for NaN/inf (bad tracking)
         if not np.all(np.isfinite(skeleton_48)):
+            nan_count = np.sum(~np.isfinite(skeleton_48))
+            self.get_logger().warn(
+                f"Skeleton has {nan_count}/48 non-finite values, dropping frame",
+                throttle_duration_sec=2.0,
+            )
             return
 
         # Transform to base_link frame via tf2
@@ -250,9 +276,20 @@ class VAMInferenceNode(Node):
 
         # Check data freshness
         if self._skeleton_stamp is None or self._latest_skeleton is None:
+            self.get_logger().warn(
+                "Waiting for skeleton data — no valid skeleton received yet",
+                throttle_duration_sec=5.0,
+            )
             return
-        if self._joints_stamp is None or self._latest_joints is None:
-            return
+        # Joint state is always needed in robot mode (for P-controller),
+        # and for non-skeleton-only models (joints are part of the input).
+        if not self._skeleton_only or self._mode == "robot":
+            if self._joints_stamp is None or self._latest_joints is None:
+                self.get_logger().warn(
+                    "Waiting for joint state data",
+                    throttle_duration_sec=5.0,
+                )
+                return
 
         skeleton_age = (now - self._skeleton_stamp).nanoseconds / 1e9
         if skeleton_age > self._tracking_timeout:
@@ -274,7 +311,10 @@ class VAMInferenceNode(Node):
             self.get_logger().info("SafetyChecker seeded with current robot position")
 
         # Feed frame to assembler
-        self._assembler.add_frame(self._latest_skeleton, self._latest_joints)
+        if self._skeleton_only:
+            self._assembler.add_frame(self._latest_skeleton)
+        else:
+            self._assembler.add_frame(self._latest_skeleton, self._latest_joints)
 
         if not self._assembler.is_ready():
             self._ensemble.step()
@@ -336,7 +376,10 @@ class VAMInferenceNode(Node):
             tf2_ros.ConnectivityException,
             tf2_ros.ExtrapolationException,
         ) as e:
-            self.get_logger().warn(f"TF lookup failed: {e}", throttle_duration_sec=2.0)
+            self.get_logger().warn(
+                f"TF lookup failed: 'base_link' ← '{source_frame}': {e}",
+                throttle_duration_sec=2.0,
+            )
             return None
 
         # Extract rotation matrix and translation from transform

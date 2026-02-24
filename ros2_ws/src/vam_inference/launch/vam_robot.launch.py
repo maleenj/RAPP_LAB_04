@@ -56,6 +56,17 @@ from launch_ros.actions import Node
 VAM_PREFIX = "vam/"
 
 
+def _find_latest_model(prefix: str = "vam_skelonly_") -> str | None:
+    """Find the most recent model directory matching a prefix."""
+    models_dir = Path("/data/models")
+    if not models_dir.exists():
+        return None
+    matches = sorted(models_dir.glob(f"{prefix}*"))
+    if matches and (matches[-1] / "best.pt").exists():
+        return str(matches[-1])
+    return None
+
+
 def _prefix_urdf(urdf_path: str, prefix: str) -> str:
     """Read a URDF, remove world link/joint, prefix remaining link frames."""
     urdf = Path(urdf_path).read_text()
@@ -79,16 +90,23 @@ def generate_launch_description():
     urdf_path = "/data/processed/ur10.urdf"
     vam_urdf = _prefix_urdf(urdf_path, VAM_PREFIX)
 
+    # Auto-detect latest skeleton-only model, fall back to original
+    latest_skelonly = _find_latest_model("vam_skelonly_")
+    if latest_skelonly:
+        default_model_dir = latest_skelonly
+    else:
+        default_model_dir = "/data/models/vam_20260210_2342"
+
     return LaunchDescription(
         [
             # --- Arguments with CONSERVATIVE defaults for real robot ---
             DeclareLaunchArgument(
                 "checkpoint_path",
-                default_value="/data/models/vam_20260210_2342/best.pt",
+                default_value=f"{default_model_dir}/best.pt",
             ),
             DeclareLaunchArgument(
                 "model_config_path",
-                default_value="/data/models/vam_20260210_2342/model_config.json",
+                default_value=f"{default_model_dir}/model_config.json",
             ),
             DeclareLaunchArgument(
                 "norm_stats_path",
