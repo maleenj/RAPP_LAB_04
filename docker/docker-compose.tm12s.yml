@@ -1,19 +1,55 @@
 ###############################################
-# VAM Inference Container
+# Docker Compose for TM12S robot operation
+#
+# All services run on ROS_DOMAIN_ID=0 (same as ZED/UR10).
+# Only use one robot at a time — stop UR10 containers before
+# starting TM12S, and vice versa.
 #
 # Usage:
-#   cd docker
-#   docker compose up -d
-#   docker exec -it rapp_vam bash
+#   docker compose -f docker/docker-compose.tm12s.yml up
 ###############################################
+version: '3.8'
 
 services:
-  vam:
+  # ---------------------------------------------------------
+  # TM12S Driver + MoveIt Servo
+  # ---------------------------------------------------------
+  tm12s_driver:
+    build:
+      context: ..
+      dockerfile: TM12S_Dockerfile
+    container_name: rapp_tm12s
+    hostname: tm12s-container
+    network_mode: host
+
+    environment:
+      - DISPLAY=${DISPLAY:-:0}
+      - ROS_DOMAIN_ID=0
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - RCUTILS_COLORIZED_OUTPUT=1
+      - QT_X11_NO_MITSHM=1
+
+    volumes:
+      # Code (development mode)
+      - ../ros2_ws:/workspace/ros2_ws:rw
+
+      # X11 for RViz
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ${HOME}/.Xauthority:/root/.Xauthority:rw
+
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
+
+  # ---------------------------------------------------------
+  # VAM Inference Node (TM12S mode)
+  # ---------------------------------------------------------
+  vam_tm12s:
     build:
       context: ./vam
       dockerfile: Dockerfile
-    container_name: rapp_vam
-    hostname: vam-container
+    container_name: rapp_vam_tm12s
+    hostname: vam-tm12s-container
 
     runtime: nvidia
     network_mode: host
@@ -26,12 +62,11 @@ services:
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
       - CUDA_VISIBLE_DEVICES=0
       - QT_X11_NO_MITSHM=1
-      - RCUTILS_COLORIZED_OUTPUT=1
       - LANG=en_US.UTF-8
       - LC_ALL=en_US.UTF-8
 
     volumes:
-      # Code directories (development mode — editable)
+      # Code directories (development mode)
       - ../vam_utils:/workspace/vam_utils:rw
       - ../notebooks:/workspace/notebooks:rw
       - ../ros2_ws:/workspace/ros2_ws:rw
@@ -46,11 +81,9 @@ services:
       - /home/maleen/models/rapplab04:/data/models:rw
       - /home/maleen/models/rapplab04/logs:/data/logs:rw
 
-      # X11 for GUI (matplotlib, etc.)
+      # X11
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - ${HOME}/.Xauthority:/root/.Xauthority:rw
-
-      # GPU device files
       - /dev/dri:/dev/dri:rw
 
     devices:
@@ -69,3 +102,8 @@ services:
 
     shm_size: '8gb'
     restart: unless-stopped
+
+networks:
+  default:
+    name: rapp_tm12s_network
+    external: false

@@ -94,7 +94,7 @@ RUN rosdep init || true && rosdep update
 
 # Install Python dependencies for ML and robotics
 COPY requirements.txt /tmp/requirements.txt
-RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel && \
+RUN pip3 install --no-cache-dir --upgrade pip "setuptools>=68,<80" wheel && \
     # Force reinstall of packages that conflict with system-installed versions
     pip3 install --no-cache-dir --ignore-installed \
         blinker \

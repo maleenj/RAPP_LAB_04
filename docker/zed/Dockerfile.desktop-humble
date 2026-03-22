@@ -82,7 +82,12 @@ RUN apt-get update || true && \
   numpy \
   empy \
   lark \
-  rosbags && \
+  rosbags \
+  transforms3d \
+  scipy \
+  pyserial \
+  pyyaml \
+  requests && \
   rm -rf /var/lib/apt/lists/*
 
 # Initialize rosdep
@@ -111,6 +116,18 @@ RUN apt-get update || true && \
   ros-${ROS2_DIST}-joint-state-publisher-gui \
   ros-${ROS2_DIST}-robot-state-publisher \
   ros-${ROS2_DIST}-rqt-tf-tree \
+  ros-${ROS2_DIST}-rqt-robot-monitor \
+  # ros2_control packages (needed for TM12S)
+  ros-${ROS2_DIST}-ros2-control \
+  ros-${ROS2_DIST}-ros2-controllers \
+  ros-${ROS2_DIST}-controller-manager \
+  ros-${ROS2_DIST}-joint-trajectory-controller \
+  ros-${ROS2_DIST}-joint-state-broadcaster \
+  ros-${ROS2_DIST}-force-torque-sensor-broadcaster \
+  ros-${ROS2_DIST}-rmw-fastrtps-cpp \
+  ros-${ROS2_DIST}-cv-bridge \
+  ros-${ROS2_DIST}-image-transport \
+  ros-${ROS2_DIST}-diagnostic-updater \
   # Data collection tools
   ros-${ROS2_DIST}-rosbag2 \
   ros-${ROS2_DIST}-rosbag2-storage-mcap \
@@ -159,6 +176,23 @@ RUN /bin/bash -c "source /opt/ros/$ROS_DISTRO/setup.bash && \
   ' -DCMAKE_CXX_FLAGS=\"-Wl,--allow-shlib-undefined\"' " && \
   rm -rf /var/lib/apt/lists/*
 
+############ Install TM2 ROS2 Driver (TM12S) ############
+
+RUN mkdir -p /tm2_ws
+WORKDIR /tm2_ws
+RUN git clone -b humble \
+    https://github.com/TechmanRobotInc/tm2_ros2.git src
+
+RUN bash -c "\
+    apt-get update && \
+    source /opt/ros/humble/setup.bash && \
+    rosdep install --from-paths src --ignore-src -r -y \
+        --skip-keys='tm_controllers warehouse_ros_mongo ign_ros2_control ros_ign_bridge ros_ign_gazebo ros_gz' && \
+    colcon build \
+        --packages-ignore tm_gazebo \
+        --cmake-args -DCMAKE_BUILD_TYPE=Release \
+    && rm -rf /var/lib/apt/lists/*"
+
 ############ Configure Environment ############
 
 WORKDIR /root/ros2_ws
@@ -170,7 +204,9 @@ RUN sudo chmod 755 /sbin/ros_entrypoint.sh
 # Configure RMW and source workspace
 RUN echo "export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp" >> /root/.bashrc && \
     echo "source /opt/ros/${ROS2_DIST}/setup.bash" >> /root/.bashrc && \
-    echo "source /root/ros2_ws/install/setup.bash" >> /root/.bashrc
+    echo "source /root/ros2_ws/install/setup.bash" >> /root/.bashrc && \
+    echo "source /tm2_ws/install/setup.bash" >> /root/.bashrc && \
+    echo "alias tmd='ros2 run tm_driver tm_driver robot_ip:=192.168.10.2'" >> /root/.bashrc
 
 ENTRYPOINT ["/sbin/ros_entrypoint.sh"]
 CMD ["bash"]

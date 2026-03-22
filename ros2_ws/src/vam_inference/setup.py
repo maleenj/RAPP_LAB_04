@@ -23,6 +23,7 @@ setup(
     entry_points={
         'console_scripts': [
             'vam_inference_node = vam_inference.vam_node:main',
+            'vam_tm12s_node = vam_inference.vam_tm12s_node:main',
         ],
     },
 )

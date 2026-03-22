@@ -1,0 +1,38 @@
+# Domain Bridge Configuration: ZED (domain 0) → TM12S (domain 30)
+#
+# Relays skeleton tracking and TF data so the TM12S VAM node
+# (running on domain 30) can receive ZED camera data from domain 0.
+#
+# Used by: docker/docker-compose.tm12s.yml (domain_bridge service)
+
+name: zed_to_tm12s_bridge
+
+from_domain: 0
+to_domain: 30
+
+topics:
+  # ZED skeleton tracking data
+  /zed/zed_node/body_trk/skeletons:
+    type: zed_msgs/msg/ObjectsStamped
+    qos:
+      reliability: best_effort
+      durability: volatile
+      history: keep_last
+      depth: 1
+
+  # TF data (needed for skeleton coordinate transforms)
+  /tf:
+    type: tf2_msgs/msg/TFMessage
+    qos:
+      reliability: reliable
+      durability: volatile
+      history: keep_last
+      depth: 100
+
+  /tf_static:
+    type: tf2_msgs/msg/TFMessage
+    qos:
+      reliability: reliable
+      durability: transient_local
+      history: keep_last
+      depth: 100

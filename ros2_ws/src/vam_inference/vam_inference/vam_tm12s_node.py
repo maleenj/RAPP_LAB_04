@@ -1,0 +1,498 @@
+"""VAM Inference Node — real-time skeleton-to-joint prediction for TM12S.
+
+Subscribes to ZED skeleton tracking and TM12S joint states, runs the trained
+Action Chunking Transformer (trained on UR10 data) through the temporal
+ensemble pipeline, applies sign convention mapping, and publishes smooth
+joint commands.
+
+The model outputs UR10 joint angles which are mapped to TM12S joint space
+via per-joint sign multipliers and angular offsets derived from comparing
+UR10 and TM12S URDF joint frame conventions:
+    tm12s_angle = sign * ur10_angle + offset
+
+Modes:
+    rviz  — publish JointState on /vam/joint_states for RViz visualization
+    robot — stream joint velocity commands to MoveIt Servo via JointJog
+
+Robot mode requires:
+    1. Appropriate position controller active (forward_position_controller
+       or tmr_arm_controller depending on MoveIt Servo config)
+    2. MoveIt Servo running with tm12s_servo_vam.yaml config
+"""
+
+import sys
+from pathlib import Path
+
+import numpy as np
+import rclpy
+from rclpy.node import Node
+from rclpy.qos import (
+    QoSProfile,
+    QoSReliabilityPolicy,
+    QoSHistoryPolicy,
+    QoSDurabilityPolicy,
+)
+from rclpy.time import Time
+from control_msgs.msg import JointJog
+from sensor_msgs.msg import JointState
+from std_msgs.msg import Int8
+from zed_msgs.msg import ObjectsStamped
+
+import tf2_ros
+
+# Ensure vam_utils is importable (mounted at /workspace in container)
+_workspace = Path("/workspace")
+if str(_workspace) not in sys.path:
+    sys.path.insert(0, str(_workspace))
+
+from vam_utils.config import InferenceConfig
+from vam_utils.data.robot_configs import TM12S_JOINT_NAMES, TM12S_CONFIG
+from vam_utils.inference import (
+    InputAssembler,
+    VAMModelWrapper,
+    TemporalEnsemble,
+)
+from vam_utils.inference.tm12s_safety_checker import TM12SSafetyChecker
+
+# Frame for skeleton TF transform — must match what the model was trained on.
+# The UR10 node uses "base_link"; we must use the same frame so the model
+# sees the same skeleton orientation regardless of which robot URDF is loaded.
+SKELETON_TRANSFORM_FRAME = "base_link"
+
+# Planning frame for TM12S (used in JointJog messages for robot mode)
+TM12S_PLANNING_FRAME = TM12S_CONFIG.planning_frame  # "base"
+
+
+class VAMTM12SInferenceNode(Node):
+    def __init__(self):
+        super().__init__("vam_tm12s_inference_node")
+
+        # --- Declare parameters ---
+        self.declare_parameter("mode", "rviz")
+        self.declare_parameter(
+            "checkpoint_path", "/data/models/vam_20260210_2342/best.pt"
+        )
+        self.declare_parameter(
+            "model_config_path", "/data/models/vam_20260210_2342/model_config.json"
+        )
+        self.declare_parameter(
+            "norm_stats_path",
+            "/data/processed/tensors/2026_02_10_tin10_tout10/norm_stats.pt",
+        )
+        self.declare_parameter("device", "cuda")
+        self.declare_parameter("prediction_stride_K", 1)
+        self.declare_parameter("ensemble_decay_weight", 0.5)
+        self.declare_parameter("max_joint_velocity_rad_s", 1.0)
+        self.declare_parameter("max_joint_acceleration_rad_s2", 5.0)
+        self.declare_parameter("target_skeleton_id", -1)
+        self.declare_parameter("tracking_timeout_sec", 0.5)
+        self.declare_parameter("trajectory_lookahead_frames", 5)
+        self.declare_parameter("servo_proportional_gain", 5.0)
+        # Per-joint sign multipliers and offsets for UR10 → TM12S mapping.
+        # Defaults from TM12S_CONFIG (derived from URDF comparison).
+        self.declare_parameter(
+            "joint_sign_multipliers", TM12S_CONFIG.sign_multipliers
+        )
+        self.declare_parameter(
+            "joint_offsets", TM12S_CONFIG.joint_offsets
+        )
+
+        # --- Read parameters ---
+        self._mode = self.get_parameter("mode").value
+        self._target_skeleton_id = self.get_parameter("target_skeleton_id").value
+        self._tracking_timeout = self.get_parameter("tracking_timeout_sec").value
+        self._lookahead = self.get_parameter("trajectory_lookahead_frames").value
+        self._servo_gain = self.get_parameter("servo_proportional_gain").value
+        self._sign_multipliers = np.array(
+            self.get_parameter("joint_sign_multipliers").value, dtype=np.float32
+        )
+        self._joint_offsets = np.array(
+            self.get_parameter("joint_offsets").value, dtype=np.float32
+        )
+
+        # --- Build inference config from parameters ---
+        config = InferenceConfig(
+            checkpoint_path=Path(self.get_parameter("checkpoint_path").value),
+            model_config_path=Path(self.get_parameter("model_config_path").value),
+            norm_stats_path=Path(self.get_parameter("norm_stats_path").value),
+            device=self.get_parameter("device").value,
+            prediction_stride_K=self.get_parameter("prediction_stride_K").value,
+            ensemble_decay_weight=self.get_parameter("ensemble_decay_weight").value,
+            max_joint_velocity_rad_s=self.get_parameter(
+                "max_joint_velocity_rad_s"
+            ).value,
+            max_joint_acceleration_rad_s2=self.get_parameter(
+                "max_joint_acceleration_rad_s2"
+            ).value,
+        )
+
+        # --- Load model and create pipeline components ---
+        self.get_logger().info("Loading VAM model for TM12S...")
+        self._model = VAMModelWrapper(config)
+        self._skeleton_only = self._model.skeleton_only
+        self._assembler = InputAssembler(
+            norm_stats=self._model.norm_stats,
+            T_in=10,
+            skeleton_only=self._skeleton_only,
+        )
+        self._ensemble = TemporalEnsemble(
+            T_out=10,
+            K=config.prediction_stride_K,
+            decay_weight=config.ensemble_decay_weight,
+        )
+        # In robot mode, MoveIt Servo handles velocity/acceleration/collision
+        # safety — TM12SSafetyChecker only does joint limit clamping.
+        self._safety = TM12SSafetyChecker(
+            max_joint_velocity_rad_s=config.max_joint_velocity_rad_s,
+            max_joint_acceleration_rad_s2=config.max_joint_acceleration_rad_s2,
+            dt=config.frame_dt,
+            joint_limits_only=(self._mode == "robot"),
+        )
+        model_type_str = "skeleton_only" if self._skeleton_only else "skeleton+joints"
+        self.get_logger().info(
+            f"Model loaded ({model_type_str}). Mode={self._mode}, "
+            f"K={config.prediction_stride_K}, lambda={config.ensemble_decay_weight}, "
+            f"sign_multipliers={self._sign_multipliers.tolist()}, "
+            f"joint_offsets={[round(o, 3) for o in self._joint_offsets.tolist()]}"
+        )
+
+        # --- State ---
+        self._latest_skeleton: np.ndarray | None = None  # [48]
+        self._latest_joints: np.ndarray | None = None  # [6]
+        self._skeleton_stamp: Time | None = None
+        self._joints_stamp: Time | None = None
+        self._pipeline_active = False
+        self._safety_seeded = False
+        self._last_target: np.ndarray | None = None  # for feedforward
+
+        # --- TF2 for coordinate transforms ---
+        self._tf_buffer = tf2_ros.Buffer()
+        self._tf_listener = tf2_ros.TransformListener(self._tf_buffer, self)
+
+        # --- Subscribers ---
+        sensor_qos = QoSProfile(
+            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1,
+            durability=QoSDurabilityPolicy.VOLATILE,
+        )
+        self._skeleton_sub = self.create_subscription(
+            ObjectsStamped,
+            "/zed/zed_node/body_trk/skeletons",
+            self._skeleton_cb,
+            sensor_qos,
+        )
+        self._joint_state_sub = self.create_subscription(
+            JointState,
+            "/joint_states",
+            self._joint_states_cb,
+            10,
+        )
+
+        # --- Publisher ---
+        self._joint_state_pub = self.create_publisher(
+            JointState, "/vam/joint_states", 10
+        )
+
+        # --- MoveIt Servo JointJog publisher (robot mode) ---
+        self._jog_pub = None
+        if self._mode == "robot":
+            self._jog_pub = self.create_publisher(
+                JointJog, "/servo_node/delta_joint_cmds", 10
+            )
+            self._servo_status_sub = self.create_subscription(
+                Int8, "/servo_node/status", self._servo_status_cb, 10
+            )
+            self.get_logger().info(
+                f"MoveIt Servo mode: publishing JointJog to /servo_node/delta_joint_cmds "
+                f"(Kp={self._servo_gain}). Ensure MoveIt Servo is running."
+            )
+
+        # --- 15 Hz timer ---
+        self._timer = self.create_timer(1.0 / 15.0, self._timer_cb)
+        self.get_logger().info("VAM TM12S inference node started at 15 Hz")
+
+    # ------------------------------------------------------------------
+    # Subscriber callbacks
+    # ------------------------------------------------------------------
+
+    def _skeleton_cb(self, msg: ObjectsStamped) -> None:
+        """Extract skeleton keypoints from ZED body tracking message."""
+        if len(msg.objects) == 0:
+            self.get_logger().debug(
+                "Skeleton msg received but objects list is empty",
+                throttle_duration_sec=2.0,
+            )
+            return
+
+        ids = [obj.label_id for obj in msg.objects]
+        self.get_logger().info(
+            f"Skeleton msg: frame_id='{msg.header.frame_id}', "
+            f"{len(msg.objects)} bodies, label_ids={ids}",
+            throttle_duration_sec=5.0,
+        )
+
+        obj = self._select_skeleton(msg.objects)
+        if obj is None:
+            self.get_logger().warn(
+                f"target_skeleton_id={self._target_skeleton_id} not found "
+                f"in detected ids={ids}",
+                throttle_duration_sec=2.0,
+            )
+            return
+
+        # Extract 16 keypoints → [48] array
+        keypoints = obj.skeleton_3d.keypoints[:16]
+        skeleton_48 = np.array(
+            [[kp.kp[0], kp.kp[1], kp.kp[2]] for kp in keypoints],
+            dtype=np.float32,
+        ).flatten()
+
+        if not np.all(np.isfinite(skeleton_48)):
+            nan_count = np.sum(~np.isfinite(skeleton_48))
+            self.get_logger().warn(
+                f"Skeleton has {nan_count}/48 non-finite values, dropping frame",
+                throttle_duration_sec=2.0,
+            )
+            return
+
+        # Transform to TM12S planning frame via tf2
+        skeleton_transformed = self._transform_skeleton(
+            skeleton_48, msg.header.frame_id, msg.header.stamp
+        )
+        if skeleton_transformed is None:
+            return
+
+        self._latest_skeleton = skeleton_transformed
+        self._skeleton_stamp = self.get_clock().now()
+
+    def _joint_states_cb(self, msg: JointState) -> None:
+        """Store latest joint positions in joint_1–joint_6 order."""
+        if len(msg.name) == 0:
+            return
+
+        joints = np.zeros(6, dtype=np.float32)
+        for i, target_name in enumerate(TM12S_JOINT_NAMES):
+            for j, msg_name in enumerate(msg.name):
+                if msg_name == target_name:
+                    joints[i] = msg.position[j]
+                    break
+
+        self._latest_joints = joints
+        self._joints_stamp = self.get_clock().now()
+
+    # ------------------------------------------------------------------
+    # Main control loop
+    # ------------------------------------------------------------------
+
+    def _timer_cb(self) -> None:
+        """15 Hz control loop: assemble → predict → sign map → safety → publish."""
+        now = self.get_clock().now()
+
+        # Check data freshness
+        if self._skeleton_stamp is None or self._latest_skeleton is None:
+            self.get_logger().warn(
+                "Waiting for skeleton data — no valid skeleton received yet",
+                throttle_duration_sec=5.0,
+            )
+            return
+        if not self._skeleton_only or self._mode == "robot":
+            if self._joints_stamp is None or self._latest_joints is None:
+                self.get_logger().warn(
+                    "Waiting for joint state data",
+                    throttle_duration_sec=5.0,
+                )
+                return
+
+        skeleton_age = (now - self._skeleton_stamp).nanoseconds / 1e9
+        if skeleton_age > self._tracking_timeout:
+            if self._pipeline_active:
+                self.get_logger().warn(
+                    f"Skeleton tracking lost ({skeleton_age:.1f}s), holding position"
+                )
+                if self._mode == "robot":
+                    self._hold_position()
+                self._pipeline_active = False
+            return
+
+        self._pipeline_active = True
+
+        # Seed safety checker with actual robot position on first active frame
+        # (robot mode only — rviz mode passes raw model output through)
+        if self._mode == "robot":
+            if not self._safety_seeded and self._latest_joints is not None:
+                self._safety.seed(self._latest_joints)
+                self._safety_seeded = True
+                self.get_logger().info("SafetyChecker seeded with current TM12S position")
+
+        # Feed frame to assembler
+        if self._skeleton_only:
+            self._assembler.add_frame(self._latest_skeleton)
+        else:
+            self._assembler.add_frame(self._latest_skeleton, self._latest_joints)
+
+        if not self._assembler.is_ready():
+            self._ensemble.step()
+            return
+
+        # Run model if it's time
+        if self._ensemble.should_predict():
+            input_tensor = self._assembler.get_input_tensor()
+            chunk = self._model.predict(input_tensor)  # [T_out, 6] radians (UR10 space)
+            self._ensemble.add_prediction(chunk)
+
+        # Query ensemble and apply sign mapping
+        if self._ensemble.num_predictions > 0:
+            target = self._ensemble.query()
+
+            # Map UR10 joint angles → TM12S: sign flip + angular offset
+            target = self._sign_multipliers * target + self._joint_offsets
+
+            if self._mode == "robot":
+                # In robot mode, apply safety checks (MoveIt Servo is primary
+                # safety layer; this catches outliers before streaming)
+                report = self._safety.check(target)
+                if report.warnings:
+                    for w in report.warnings[:1]:
+                        self.get_logger().warn(w)
+                target = report.target
+
+            # Publish predicted joint state (always, for RViz)
+            self._publish_joint_state(target)
+
+            # Stream to robot controller
+            if self._mode == "robot":
+                self._stream_to_robot(target)
+
+        self._ensemble.step()
+
+    # ------------------------------------------------------------------
+    # Skeleton helpers
+    # ------------------------------------------------------------------
+
+    def _select_skeleton(self, objects) -> object | None:
+        """Select which skeleton to track from detected objects."""
+        target_id = self._target_skeleton_id
+
+        if target_id >= 0:
+            for obj in objects:
+                if obj.label_id == target_id:
+                    return obj
+            return None
+
+        return objects[0]
+
+    def _transform_skeleton(
+        self, skeleton_48: np.ndarray, source_frame: str, stamp
+    ) -> np.ndarray | None:
+        """Transform skeleton keypoints from source_frame to model training frame."""
+        try:
+            transform = self._tf_buffer.lookup_transform(
+                SKELETON_TRANSFORM_FRAME, source_frame, Time(),
+                timeout=rclpy.duration.Duration(seconds=0.1),
+            )
+        except (
+            tf2_ros.LookupException,
+            tf2_ros.ConnectivityException,
+            tf2_ros.ExtrapolationException,
+        ) as e:
+            self.get_logger().warn(
+                f"TF lookup failed: '{SKELETON_TRANSFORM_FRAME}' ← '{source_frame}': {e}",
+                throttle_duration_sec=2.0,
+            )
+            return None
+
+        t = transform.transform.translation
+        q = transform.transform.rotation
+        translation = np.array([t.x, t.y, t.z], dtype=np.float64)
+        rotation = self._quat_to_rotation_matrix(q.x, q.y, q.z, q.w)
+
+        points = skeleton_48.reshape(16, 3).astype(np.float64)
+        transformed = (rotation @ points.T).T + translation
+        return transformed.flatten().astype(np.float32)
+
+    @staticmethod
+    def _quat_to_rotation_matrix(x, y, z, w) -> np.ndarray:
+        """Convert quaternion (xyzw) to 3x3 rotation matrix."""
+        n = np.sqrt(x * x + y * y + z * z + w * w)
+        x, y, z, w = x / n, y / n, z / n, w / n
+        return np.array(
+            [
+                [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+                [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+                [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
+            ]
+        )
+
+    # ------------------------------------------------------------------
+    # Publishing
+    # ------------------------------------------------------------------
+
+    def _publish_joint_state(self, joint_angles: np.ndarray) -> None:
+        """Publish predicted joint positions for RViz."""
+        msg = JointState()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.name = list(TM12S_JOINT_NAMES)
+        msg.position = joint_angles.tolist()
+        self._joint_state_pub.publish(msg)
+
+    def _hold_position(self) -> None:
+        """Command the robot to hold its current position."""
+        if self._jog_pub is None:
+            return
+        msg = JointJog()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = TM12S_PLANNING_FRAME
+        msg.joint_names = list(TM12S_JOINT_NAMES)
+        msg.velocities = [0.0] * 6
+        self._jog_pub.publish(msg)
+
+    def _stream_to_robot(self, target: np.ndarray) -> None:
+        """Stream joint velocity commands to MoveIt Servo.
+
+        P-controller + feedforward, same approach as UR10 node.
+        """
+        if self._jog_pub is None or self._latest_joints is None:
+            return
+
+        error = target - self._latest_joints
+        velocities = self._servo_gain * error
+
+        if self._last_target is not None:
+            dt = 1.0 / 15.0
+            feedforward = (target - self._last_target) / dt
+            velocities = velocities + feedforward
+
+        self._last_target = target.copy()
+
+        msg = JointJog()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = TM12S_PLANNING_FRAME
+        msg.joint_names = list(TM12S_JOINT_NAMES)
+        msg.velocities = velocities.tolist()
+        self._jog_pub.publish(msg)
+
+    def _servo_status_cb(self, msg: Int8) -> None:
+        """Log MoveIt Servo status warnings."""
+        if msg.data != 0:
+            self.get_logger().warn(
+                f"MoveIt Servo status: {msg.data}", throttle_duration_sec=2.0
+            )
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = VAMTM12SInferenceNode()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        node.get_logger().info("Shutdown requested, holding position...")
+        if node._mode == "robot":
+            node._hold_position()
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+if __name__ == "__main__":
+    main()

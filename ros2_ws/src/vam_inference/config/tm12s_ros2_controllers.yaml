@@ -1,0 +1,48 @@
+# TM12S ros2_controllers config with forward_position_controller added
+# for MoveIt Servo streaming.
+#
+# Usage: replace/overlay the default tm12s_moveit_config ros2_controllers.yaml
+# when launching with MoveIt Servo.
+#
+# The forward_position_controller accepts Float64MultiArray position commands
+# on /forward_position_controller/commands — same pattern as UR10.
+
+controller_manager:
+  ros__parameters:
+    update_rate: 100  # Hz
+
+    tmr_arm_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    forward_position_controller:
+      type: forward_command_controller/ForwardCommandController
+
+
+tmr_arm_controller:
+  ros__parameters:
+    command_interfaces:
+      - position
+    state_interfaces:
+      - position
+      - velocity
+    joints:
+      - joint_1
+      - joint_2
+      - joint_3
+      - joint_4
+      - joint_5
+      - joint_6
+
+forward_position_controller:
+  ros__parameters:
+    joints:
+      - joint_1
+      - joint_2
+      - joint_3
+      - joint_4
+      - joint_5
+      - joint_6
+    interface_name: position
