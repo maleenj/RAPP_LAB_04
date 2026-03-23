@@ -19,7 +19,7 @@ servo_node:
     scale:
       linear:  0.6
       rotational:  0.3
-      joint: 0.01
+      joint: 1.0
 
     system_latency_compensation: 0.04
 
@@ -67,7 +67,7 @@ servo_node:
 
     ## Collision checking
     check_collisions: true
-    collision_check_rate: 5.0
+    collision_check_rate: 25.0
     collision_check_type: threshold_distance
     self_collision_proximity_threshold: 0.01
     scene_collision_proximity_threshold: 0.02

@@ -19,6 +19,8 @@
   <depend>tf2_ros</depend>
   <depend>tf2_geometry_msgs</depend>
   <depend>robot_state_publisher</depend>
+  <depend>moveit_msgs</depend>
+  <exec_depend>tm_msgs</exec_depend>
 
   <export>
     <build_type>ament_python</build_type>

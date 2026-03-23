@@ -1,0 +1,73 @@
+###############################################
+# Hardware container: ZED camera + TM12S driver + MoveIt Servo
+#
+# Usage:
+#   cd docker
+#   docker compose -f docker-compose.hw.yml up -d
+#   docker exec -it rapp_hw bash
+#
+# Start the VAM container separately:
+#   docker compose up -d
+###############################################
+
+services:
+  hw:
+    image: zed_ros2_desktop_u22.04_sdk_5.1.0_cuda_12.1.1:latest
+    container_name: rapp_hw
+    hostname: hw-container
+    network_mode: host
+
+    runtime: nvidia
+
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - DISPLAY=${DISPLAY:-:0}
+      - ROS_DOMAIN_ID=0
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - RCUTILS_COLORIZED_OUTPUT=1
+      - QT_X11_NO_MITSHM=1
+      - LANG=en_US.UTF-8
+      - LC_ALL=en_US.UTF-8
+
+    volumes:
+      # Servo & controller configs (mounted into tm2_ws install tree)
+      - ../ros2_ws/src/vam_inference/config/tm12s_servo_vam.yaml:/tm2_ws/install/tm12s_moveit_config/share/tm12s_moveit_config/config/tm12s_servo_vam.yaml:ro
+      - ../ros2_ws/src/vam_inference/config/tm12s_ros2_controllers.yaml:/tm2_ws/install/tm12s_moveit_config/share/tm12s_moveit_config/config/ros2_controllers.yaml:ro
+
+      # Code directories (development mode)
+      - ../vam_utils:/workspace/vam_utils:rw
+      - ../notebooks:/workspace/notebooks:rw
+      - ../ros2_ws:/workspace/ros2_ws:rw
+      - ../scripts:/workspace/scripts:rw
+
+      # Configuration
+      - ../config:/config:ro
+
+      # Data volumes
+      - /home/maleen/rosbags/rapplab04:/data/rosbags:ro
+      - /home/maleen/csvdata/rapplab04:/data/processed:rw
+      - /home/maleen/models/rapplab04:/data/models:rw
+      - /home/maleen/models/rapplab04/logs:/data/logs:rw
+
+      # X11 for RViz
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ${HOME}/.Xauthority:/root/.Xauthority:rw
+      - /dev/dri:/dev/dri:rw
+
+    devices:
+      - /dev/dri:/dev/dri
+
+    stdin_open: true
+    tty: true
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+    shm_size: '8gb'
+    restart: unless-stopped

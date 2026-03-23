@@ -10,27 +10,51 @@ TM12S deployment of the Vision-Action Model pipeline. Uses the same trained mode
 - NVIDIA GPU with driver 535+
 - Docker and Docker Compose
 - NVIDIA Container Toolkit
-- MoveIt Servo confirmed working with TM12S
 
 ## Architecture
 
 Two containers, both using `network_mode: host` so ROS2 topics are visible across both:
 
-- **VAM container** (`rapp_vam`) — PyTorch, model inference, rosbag playback. Launches `robot_state_publisher` + inference node (no RViz).
-- **ZED container** (e.g. `stoic_beaver`) — ZED SDK, TM2 driver, MoveIt, RViz. Has the TM12S meshes so RViz can render the robot model.
+| Container | Compose File | Name | What's inside |
+|---|---|---|---|
+| **Hardware** | `docker/docker-compose.hw.yml` | `rapp_hw` | ZED SDK, TM2 driver, MoveIt, RViz, TM12S meshes |
+| **VAM** | `docker/docker-compose.yml` | `rapp_vam` | PyTorch, model inference, rosbag playback |
 
-Both containers mount `/data/processed` so they share URDFs, configs, and the RViz config file.
+Both containers share the same volumes:
+
+| Host path | Container path | Purpose |
+|---|---|---|
+| `ros2_ws/` | `/workspace/ros2_ws` | VAM inference ROS2 package |
+| `vam_utils/` | `/workspace/vam_utils` | Shared utilities |
+| `notebooks/` | `/workspace/notebooks` | Jupyter notebooks |
+| `scripts/` | `/workspace/scripts` | Helper scripts |
+| `config/` | `/config` | Configuration files |
+| `~/rosbags/rapplab04` | `/data/rosbags` | Rosbag recordings |
+| `~/csvdata/rapplab04` | `/data/processed` | Processed data, URDFs, RViz configs |
+| `~/models/rapplab04` | `/data/models` | Trained models |
+
+The hardware container also auto-mounts the servo and controller configs into the TM2 install tree — no manual copying needed.
 
 ## Setup
 
 ### 1. Start Containers
 
-Start your VAM and ZED containers as usual (launched separately).
+```bash
+# Enable X11 for GUI (RViz, matplotlib)
+xhost +local:docker
 
-### 2. Export TM12S URDF (one-time, from ZED container)
+# Start hardware container
+cd docker
+docker compose -f docker-compose.hw.yml up -d
+
+# Start VAM container
+docker compose up -d
+```
+
+### 2. Export TM12S URDF (one-time)
 
 ```bash
-docker exec -it <zed_container> bash
+docker exec -it rapp_hw bash
 source /opt/ros/humble/setup.bash
 source /tm2_ws/install/setup.bash
 
@@ -39,19 +63,13 @@ ros2 run xacro xacro \
     > /data/processed/tm12s.urdf
 ```
 
-### 3. Build VAM inference package (VAM container)
+### 3. Build VAM inference package
 
 ```bash
 docker exec -it rapp_vam bash
 cd /workspace/ros2_ws
 colcon build --symlink-install
 source install/setup.bash
-```
-
-### 4. Enable X11 for GUI (RViz, matplotlib)
-
-```bash
-xhost +local:docker
 ```
 
 ## Key Differences from UR10
@@ -64,30 +82,29 @@ xhost +local:docker
 | EE frame | `tool0` | `flange` |
 | Robot IP | 10.0.0.89 | 192.168.10.2 |
 | Driver | `ur_robot_driver` | `tm_driver` (tm2_ros2) |
-| Container | `rapp_vam` + ZED container | `rapp_vam` + ZED container |
 
 ## Running the Inference Node
 
 ### Mode 1: RViz Visualization (rosbag replay)
 
 Visualize model predictions on a TM12S ghost robot — no real robot needed.
-VAM inference runs in the VAM container; RViz runs in the ZED container (where meshes are available).
+VAM inference runs in the VAM container; RViz runs in the hardware container (where meshes are available).
 
 ```bash
-# Terminal 1 (VAM container): Play rosbag with clock
+# Terminal 1 (rapp_vam): Play rosbag with clock
 docker exec -it rapp_vam bash
 source /opt/ros/humble/setup.bash
 source /workspace/ros2_ws/install/setup.bash
 ros2 bag play /data/rosbags/<name> --clock
 
-# Terminal 2 (VAM container): Launch inference + robot_state_publishers (no RViz)
+# Terminal 2 (rapp_vam): Launch inference + robot_state_publishers (no RViz)
 docker exec -it rapp_vam bash
 source /opt/ros/humble/setup.bash
 source /workspace/ros2_ws/install/setup.bash
 ros2 launch vam_inference vam_tm12s_headless.launch.py use_sim_time:=true
 
-# Terminal 3 (ZED container): Open RViz with TM12S config
-docker exec -it <zed_container> bash
+# Terminal 3 (rapp_hw): Open RViz with TM12S config
+docker exec -it rapp_hw bash
 source /opt/ros/humble/setup.bash
 source /tm2_ws/install/setup.bash
 rviz2 -d /data/processed/vam_tm12s.rviz
@@ -99,53 +116,56 @@ Check that each joint bends in the expected direction. If a joint moves opposite
 
 Control the real TM12S using skeleton data from a rosbag.
 
+Unlike UR10 (where `ur_moveit_config` has built-in servo support via `launch_servo:=true`),
+the TM12S `tm12s_moveit_config` package has **no** MoveIt Servo support, and its launch
+files start a fake `ros2_control_node` that conflicts with the real driver. We use custom
+launch files from `vam_inference` that fix both issues.
+
+**Important:** Do NOT use `tm12s_moveit.launch.py` or `demo.launch.py` — both start a
+fake ros2_control stack that publishes competing zero joint states, causing a "blinking
+robot" in RViz. Use `tm12s_moveit_hw.launch.py` instead.
+
 ```bash
-# Terminal 1 (ZED container): Start TM12S driver
-docker exec -it <zed_container> bash
+# Terminal 1 (rapp_hw): Launch MoveIt + TM12S driver + RViz (no fake ros2_control)
+docker exec -it rapp_hw bash
 source /opt/ros/humble/setup.bash
 source /tm2_ws/install/setup.bash
-ros2 run tm_driver tm_driver robot_ip:=192.168.10.2
+source /workspace/ros2_ws/install/setup.bash
+ros2 launch vam_inference tm12s_moveit_hw.launch.py robot_ip:=192.168.10.2
 
-# Terminal 2 (ZED container): Launch MoveIt + Servo
-docker exec -it <zed_container> bash
+# Terminal 2 (rapp_hw): Launch MoveIt Servo node
+docker exec -it rapp_hw bash
 source /opt/ros/humble/setup.bash
 source /tm2_ws/install/setup.bash
+source /workspace/ros2_ws/install/setup.bash
+ros2 launch vam_inference tm12s_servo.launch.py
 
-#   Copy tuned servo config (one-time, from shared /data volume):
-cp /data/processed/tm12s_servo_vam.yaml \
-    /tm2_ws/install/tm12s_moveit_config/share/tm12s_moveit_config/config/
-
-cp /data/processed/tm12s_ros2_controllers.yaml \
-    /tm2_ws/install/tm12s_moveit_config/share/tm12s_moveit_config/config/ros2_controllers.yaml
-
-#   Launch MoveIt with Servo:
-ros2 launch tm12s_moveit_config demo.launch.py launch_servo:=true
-
-# Terminal 3 (ZED container): Switch to forward_position_controller
-docker exec -it <zed_container> bash
+# Terminal 3 (rapp_hw): Start servo + velocity streaming bridge
+docker exec -it rapp_hw bash
 source /opt/ros/humble/setup.bash
 source /tm2_ws/install/setup.bash
+source /workspace/ros2_ws/install/setup.bash
 
-ros2 service call /controller_manager/switch_controller \
-    controller_manager_msgs/srv/SwitchController \
-    "{activate_controllers: ['forward_position_controller'], \
-      deactivate_controllers: ['tmr_arm_controller'], \
-      strictness: 2}"
-
-#   Start servo (it may launch paused):
 ros2 service call /servo_node/start_servo std_srvs/srv/Trigger {}
 
-# Terminal 4: Static transform — map → world (camera-to-robot, adjust for lab)
+#   VJog bridge: differentiates servo positions into velocities, then
+#   streams them to the TM12S via ContinueVJog (native velocity mode).
+#   Waits for convergence before sending any commands to the robot.
+ros2 run vam_inference servo_to_tm_vjog_bridge
+
+# Terminal 4 (rapp_hw): Static transform — map -> world (adjust for lab)
+docker exec -it rapp_hw bash
+source /opt/ros/humble/setup.bash
 ros2 run tf2_ros static_transform_publisher \
     4.4 0.1 -0.25 1.5708 0 0 map world
 
-# Terminal 5 (VAM container): Play rosbag — skeleton topic ONLY (no --clock!)
+# Terminal 5 (rapp_vam): Play rosbag — skeleton topic ONLY (no --clock!)
 docker exec -it rapp_vam bash
 source /opt/ros/humble/setup.bash
 ros2 bag play /data/rosbags/<name> \
     --topics /zed/zed_node/body_trk/skeletons --loop
 
-# Terminal 6 (VAM container): VAM inference
+# Terminal 6 (rapp_vam): VAM inference
 docker exec -it rapp_vam bash
 source /opt/ros/humble/setup.bash
 source /workspace/ros2_ws/install/setup.bash
@@ -165,13 +185,15 @@ ros2 launch vam_inference vam_tm12s_robot.launch.py servo_proportional_gain:=1.0
 ### Mode 3: Live Performance (camera + robot)
 
 ```bash
-# Terminals 1-4 (ZED container): Same as Mode 2
-# Terminal 5 (ZED container): ZED camera (replaces rosbag)
-docker exec -it <zed_container> bash
+# Terminals 1-4 (rapp_hw): Same as Mode 2
+
+# Terminal 5 (rapp_hw): ZED camera (replaces rosbag)
+docker exec -it rapp_hw bash
 source /opt/ros/humble/setup.bash
+source /root/ros2_ws/install/setup.bash
 ros2 launch zed_wrapper zed_camera.launch.py camera_model:=zed2i
 
-# Terminal 6 (VAM container): VAM inference
+# Terminal 6 (rapp_vam): VAM inference
 docker exec -it rapp_vam bash
 source /opt/ros/humble/setup.bash
 source /workspace/ros2_ws/install/setup.bash
@@ -182,8 +204,17 @@ ros2 launch vam_inference vam_tm12s_robot.launch.py
 
 | Launch File | Mode | Use Case |
 |---|---|---|
-| `vam_tm12s_headless.launch.py` | headless | Inference + robot_state_publishers, no RViz (run RViz from ZED container) |
+| `vam_tm12s_headless.launch.py` | headless | Inference + robot_state_publishers, no RViz (run RViz from rapp_hw) |
 | `vam_tm12s_robot.launch.py` | robot | Real robot control via MoveIt Servo |
+| `tm12s_moveit_hw.launch.py` | robot | MoveIt + TM driver + RViz for real hardware (replaces upstream `tm12s_moveit.launch.py`) |
+| `tm12s_servo.launch.py` | robot | MoveIt Servo node for TM12S (launched separately from move_group) |
+
+**Bridge nodes** (required for real robot — TM driver has no ros2_control hardware plugin):
+
+| Node | Approach | Purpose |
+|---|---|---|
+| `servo_to_tm_vjog_bridge` | **ContinueVJog** (recommended) | Differentiates servo positions → streams joint velocities via TM's native velocity mode. Smooth, no batch boundaries. |
+| `servo_to_tm_bridge` | FollowJointTrajectory (fallback) | Batches servo positions into PVT trajectory goals. May be jerky at batch boundaries. |
 
 ### Key Parameters
 
@@ -197,6 +228,16 @@ ros2 launch vam_inference vam_tm12s_robot.launch.py
 | `tracking_timeout_sec` | 0.5 | 0.5 | Skeleton loss detection threshold |
 | `target_skeleton_id` | -1 | -1 | Skeleton to track (-1 = auto) |
 | `joint_sign_multipliers` | [1,1,1,1,1,1] | [1,1,1,1,1,1] | Per-joint sign flip (-1 reverses direction) |
+
+**VJog bridge parameters** (`servo_to_tm_vjog_bridge`):
+
+| Parameter | Default | Description |
+|---|---|---|
+| `max_velocity_deg_s` | 30.0 | Per-joint velocity clamp (deg/s). Start low, increase after verification. |
+| `ema_alpha` | 0.3 | Velocity smoothing (0.1 = very smooth, 0.5 = responsive) |
+| `send_rate_hz` | 30.0 | Rate for sending velocity commands to TM |
+| `convergence_threshold_rad` | 0.05 | Servo must be within this of robot before streaming starts |
+| `watchdog_timeout_sec` | 0.3 | Stop robot if no servo data for this long |
 
 ## Sign Conventions
 
@@ -250,15 +291,16 @@ Additional protections:
 | `ros2_ws/src/vam_inference/config/tm12s_servo_vam_traj.yaml` | Fallback Servo config (JointTrajectory output) |
 | `ros2_ws/src/vam_inference/config/tm12s_ros2_controllers.yaml` | ros2_control config with forward_position_controller |
 | `vam_utils/data/robot_configs.py` | TM12S joint names, limits, velocities |
-| `docker/zed/Dockerfile.desktop-humble` | ZED Dockerfile (includes TM2 driver) |
-| `/data/processed/vam_tm12s.rviz` | RViz config for TM12S visualization (shared volume) |
+| `docker/zed/Dockerfile.desktop-humble` | Hardware container Dockerfile (ZED + TM2 driver) |
+| `docker/docker-compose.hw.yml` | Hardware container compose file |
+| `docker/docker-compose.yml` | VAM container compose file |
 
 ## Controller Discovery
 
 If unsure which controller setup works:
 
 ```bash
-# Inside the container (with driver running)
+# Inside rapp_hw (with driver running)
 ros2 control list_controllers
 ros2 control list_hardware_interfaces
 ```
@@ -269,12 +311,19 @@ If only trajectory controller is available, use `tm12s_servo_vam_traj.yaml` inst
 
 ## Container Management
 
-Two containers, launched separately. Both must use `ROS_DOMAIN_ID=0` and `network_mode: host`.
-
 ```bash
+# Start containers
+cd docker
+docker compose -f docker-compose.hw.yml up -d   # hardware
+docker compose up -d                              # VAM
+
 # Shell access
-docker exec -it rapp_vam bash          # VAM container
-docker exec -it <zed_container> bash   # ZED container
+docker exec -it rapp_hw bash
+docker exec -it rapp_vam bash
+
+# Stop containers
+docker compose -f docker-compose.hw.yml down
+docker compose down
 
 # Verify ROS2 communication between containers
 ros2 topic list    # should show topics from both containers
@@ -287,17 +336,16 @@ ros2 topic list    # should show topics from both containers
 The TM12S uses `base` as its root frame (not `base_link` like UR10). Verify:
 
 ```bash
-# Inside the container with driver running
+# Inside rapp_hw with driver running
 ros2 run tf2_ros tf2_echo base link_0
 ```
 
 ### forward_position_controller won't load
 
-Ensure the updated controllers config is in place:
+The servo and controller configs are auto-mounted by docker-compose.hw.yml into the tm2_ws install tree. If something is wrong, verify the mounts:
 
 ```bash
-cp /workspace/ros2_ws/src/vam_inference/config/tm12s_ros2_controllers.yaml \
-    /tm2_ws/install/tm12s_moveit_config/share/tm12s_moveit_config/config/ros2_controllers.yaml
+docker exec rapp_hw cat /tm2_ws/install/tm12s_moveit_config/share/tm12s_moveit_config/config/ros2_controllers.yaml
 ```
 
 Then restart MoveIt.

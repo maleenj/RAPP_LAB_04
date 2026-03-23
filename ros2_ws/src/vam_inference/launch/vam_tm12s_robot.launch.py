@@ -1,41 +1,24 @@
-"""Launch VAM inference for real TM12S robot operation via MoveIt Servo.
+"""Launch VAM inference for real TM12S robot operation via direct PVT streaming.
 
-VAM publishes JointJog velocity commands to MoveIt Servo, which handles
-250Hz interpolation, self-collision avoidance, and streaming to the
-position controller.
+VAM publishes normalized joint targets; the PVT streamer sends them directly
+to the TM12S via PVT mode with collision checking via MoveIt's planning scene.
+No MoveIt Servo needed.
 
-Prerequisites (run in separate terminals / TM12S container):
+Prerequisites (run in separate terminals in rapp_hw container):
 
-    # 1. TM12S driver
-    ros2 run tm_driver tm_driver robot_ip:=192.168.10.2
+    # 1. MoveIt + TM12S driver + RViz (no fake ros2_control)
+    ros2 launch vam_inference tm12s_moveit_hw.launch.py robot_ip:=192.168.10.2
 
-    # 2. MoveIt + Servo (from TM12S container)
-    #    Copy our tuned servo config first:
-    docker cp ros2_ws/src/vam_inference/config/tm12s_servo_vam.yaml \\
-        <tm12s_container>:/tm2_ws/install/tm_moveit_config_tm12s/share/...
-    #    Then launch MoveIt with Servo:
-    ros2 launch tm_moveit_config_tm12s demo.launch.py launch_servo:=true
-
-    # 3. If needed: switch to forward_position_controller
-    #    (run test_tm12s_controllers.sh to check what's available)
-
-    # 4. Domain bridge (if skeleton data is on domain 0):
-    ros2 run domain_bridge domain_bridge <bridge_config.yaml>
-
-    # 5. Static transform — map → world (camera-to-robot, adjust for lab)
+    # 2. Static transform — map → world (camera-to-robot, adjust for lab)
     ros2 run tf2_ros static_transform_publisher \\
         4.4 0.1 -0.25 1.5708 0 0 map world
 
-    # 6. Rosbag skeleton data
+    # 3. Rosbag skeleton data (from rapp_vam container)
     ros2 bag play /data/rosbags/<name> \\
         --topics /zed/zed_node/body_trk/skeletons --loop
 
 Usage:
     ros2 launch vam_inference vam_tm12s_robot.launch.py
-
-    # Ultra-conservative first test:
-    ros2 launch vam_inference vam_tm12s_robot.launch.py \\
-        servo_proportional_gain:=1.0
 """
 
 import re
@@ -139,16 +122,25 @@ def generate_launch_description():
             DeclareLaunchArgument("tracking_timeout_sec", default_value="0.5"),
             DeclareLaunchArgument("trajectory_lookahead_frames", default_value="5"),
             DeclareLaunchArgument(
-                "servo_proportional_gain",
-                default_value="2.0",
-                description="P-controller gain for TM12S. Starting conservative. "
-                "Increase after verifying safe operation.",
+                "pvt_rate_hz", default_value="10.0",
+                description="PVT streaming rate in Hz",
+            ),
+            DeclareLaunchArgument(
+                "velocity_scale", default_value="0.7",
+                description="Fraction of TM12S hardware velocity limits to use",
+            ),
+            DeclareLaunchArgument(
+                "catch_up_threshold_rad", default_value="0.3",
+                description="Position gap (rad) that triggers MoveIt catch-up trajectory",
+            ),
+            DeclareLaunchArgument(
+                "catch_up_velocity_scale", default_value="1.0",
+                description="MoveIt velocity scaling during catch-up (0.0-1.0)",
             ),
             DeclareLaunchArgument("use_sim_time", default_value="false"),
 
             LogInfo(
-                msg="=== VAM TM12S Robot Launch: mode=robot via MoveIt Servo, "
-                "CONSERVATIVE safety limits ==="
+                msg="=== VAM TM12S Robot Launch: mode=robot via direct PVT streaming ==="
             ),
 
             # --- VAM prediction robot_state_publisher (prefixed TM12S URDF) ---
@@ -237,12 +229,17 @@ def generate_launch_description():
                         "trajectory_lookahead_frames": LaunchConfiguration(
                             "trajectory_lookahead_frames"
                         ),
-                        "servo_proportional_gain": LaunchConfiguration(
-                            "servo_proportional_gain"
-                        ),
                         "use_sim_time": LaunchConfiguration("use_sim_time"),
                     }
                 ],
             ),
+
+            # --- PVT Streamer runs in hw-container (needs moveit_msgs) ---
+            # Start separately:
+            #   ros2 run vam_inference vam_pvt_streamer
+            # Or with parameters:
+            #   ros2 run vam_inference vam_pvt_streamer --ros-args \
+            #       -p pvt_rate_hz:=10.0 -p velocity_scale:=0.7 \
+            #       -p catch_up_threshold_rad:=0.3 -p catch_up_velocity_scale:=1.0
         ]
     )

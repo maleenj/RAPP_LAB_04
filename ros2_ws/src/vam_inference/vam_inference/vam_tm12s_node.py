@@ -10,14 +10,15 @@ via per-joint sign multipliers and angular offsets derived from comparing
 UR10 and TM12S URDF joint frame conventions:
     tm12s_angle = sign * ur10_angle + offset
 
+After mapping, angles are normalized to [-π, π] via arctan2(sin, cos) so
+they match the range reported by /joint_states (TM12S encoder values).
+
 Modes:
     rviz  — publish JointState on /vam/joint_states for RViz visualization
-    robot — stream joint velocity commands to MoveIt Servo via JointJog
+    robot — publish Float64MultiArray on /vam/joint_targets for PVT streamer
 
 Robot mode requires:
-    1. Appropriate position controller active (forward_position_controller
-       or tmr_arm_controller depending on MoveIt Servo config)
-    2. MoveIt Servo running with tm12s_servo_vam.yaml config
+    vam_pvt_streamer node running (handles PVT streaming + collision checking)
 """
 
 import sys
@@ -33,9 +34,8 @@ from rclpy.qos import (
     QoSDurabilityPolicy,
 )
 from rclpy.time import Time
-from control_msgs.msg import JointJog
 from sensor_msgs.msg import JointState
-from std_msgs.msg import Int8
+from std_msgs.msg import Float64MultiArray
 from zed_msgs.msg import ObjectsStamped
 
 import tf2_ros
@@ -58,9 +58,6 @@ from vam_utils.inference.tm12s_safety_checker import TM12SSafetyChecker
 # The UR10 node uses "base_link"; we must use the same frame so the model
 # sees the same skeleton orientation regardless of which robot URDF is loaded.
 SKELETON_TRANSFORM_FRAME = "base_link"
-
-# Planning frame for TM12S (used in JointJog messages for robot mode)
-TM12S_PLANNING_FRAME = TM12S_CONFIG.planning_frame  # "base"
 
 
 class VAMTM12SInferenceNode(Node):
@@ -87,7 +84,6 @@ class VAMTM12SInferenceNode(Node):
         self.declare_parameter("target_skeleton_id", -1)
         self.declare_parameter("tracking_timeout_sec", 0.5)
         self.declare_parameter("trajectory_lookahead_frames", 5)
-        self.declare_parameter("servo_proportional_gain", 5.0)
         # Per-joint sign multipliers and offsets for UR10 → TM12S mapping.
         # Defaults from TM12S_CONFIG (derived from URDF comparison).
         self.declare_parameter(
@@ -102,7 +98,6 @@ class VAMTM12SInferenceNode(Node):
         self._target_skeleton_id = self.get_parameter("target_skeleton_id").value
         self._tracking_timeout = self.get_parameter("tracking_timeout_sec").value
         self._lookahead = self.get_parameter("trajectory_lookahead_frames").value
-        self._servo_gain = self.get_parameter("servo_proportional_gain").value
         self._sign_multipliers = np.array(
             self.get_parameter("joint_sign_multipliers").value, dtype=np.float32
         )
@@ -163,7 +158,6 @@ class VAMTM12SInferenceNode(Node):
         self._joints_stamp: Time | None = None
         self._pipeline_active = False
         self._safety_seeded = False
-        self._last_target: np.ndarray | None = None  # for feedforward
 
         # --- TF2 for coordinate transforms ---
         self._tf_buffer = tf2_ros.Buffer()
@@ -189,23 +183,19 @@ class VAMTM12SInferenceNode(Node):
             10,
         )
 
-        # --- Publisher ---
+        # --- Publishers ---
         self._joint_state_pub = self.create_publisher(
             JointState, "/vam/joint_states", 10
         )
-
-        # --- MoveIt Servo JointJog publisher (robot mode) ---
-        self._jog_pub = None
+        # Robot mode: publish normalized targets for PVT streamer
+        self._joint_target_pub = None
         if self._mode == "robot":
-            self._jog_pub = self.create_publisher(
-                JointJog, "/servo_node/delta_joint_cmds", 10
-            )
-            self._servo_status_sub = self.create_subscription(
-                Int8, "/servo_node/status", self._servo_status_cb, 10
+            self._joint_target_pub = self.create_publisher(
+                Float64MultiArray, "/vam/joint_targets", 10
             )
             self.get_logger().info(
-                f"MoveIt Servo mode: publishing JointJog to /servo_node/delta_joint_cmds "
-                f"(Kp={self._servo_gain}). Ensure MoveIt Servo is running."
+                "Robot mode: publishing targets to /vam/joint_targets "
+                "for vam_pvt_streamer."
             )
 
         # --- 15 Hz timer ---
@@ -308,10 +298,8 @@ class VAMTM12SInferenceNode(Node):
         if skeleton_age > self._tracking_timeout:
             if self._pipeline_active:
                 self.get_logger().warn(
-                    f"Skeleton tracking lost ({skeleton_age:.1f}s), holding position"
+                    f"Skeleton tracking lost ({skeleton_age:.1f}s)"
                 )
-                if self._mode == "robot":
-                    self._hold_position()
                 self._pipeline_active = False
             return
 
@@ -348,21 +336,17 @@ class VAMTM12SInferenceNode(Node):
             # Map UR10 joint angles → TM12S: sign flip + angular offset
             target = self._sign_multipliers * target + self._joint_offsets
 
-            if self._mode == "robot":
-                # In robot mode, apply safety checks (MoveIt Servo is primary
-                # safety layer; this catches outliers before streaming)
-                report = self._safety.check(target)
-                if report.warnings:
-                    for w in report.warnings[:1]:
-                        self.get_logger().warn(w)
-                target = report.target
+            # Normalize to [-π, π] so mapped values match /joint_states
+            # encoder range. Without this, offsets like 3π/2 produce values
+            # ~5 rad away from the encoder reading for the same physical pose.
+            target = np.arctan2(np.sin(target), np.cos(target))
 
             # Publish predicted joint state (always, for RViz)
             self._publish_joint_state(target)
 
-            # Stream to robot controller
+            # Publish target for PVT streamer (robot mode)
             if self._mode == "robot":
-                self._stream_to_robot(target)
+                self._publish_joint_target(target)
 
         self._ensemble.step()
 
@@ -436,48 +420,13 @@ class VAMTM12SInferenceNode(Node):
         msg.position = joint_angles.tolist()
         self._joint_state_pub.publish(msg)
 
-    def _hold_position(self) -> None:
-        """Command the robot to hold its current position."""
-        if self._jog_pub is None:
+    def _publish_joint_target(self, joint_angles: np.ndarray) -> None:
+        """Publish normalized target positions for PVT streamer."""
+        if self._joint_target_pub is None:
             return
-        msg = JointJog()
-        msg.header.stamp = self.get_clock().now().to_msg()
-        msg.header.frame_id = TM12S_PLANNING_FRAME
-        msg.joint_names = list(TM12S_JOINT_NAMES)
-        msg.velocities = [0.0] * 6
-        self._jog_pub.publish(msg)
-
-    def _stream_to_robot(self, target: np.ndarray) -> None:
-        """Stream joint velocity commands to MoveIt Servo.
-
-        P-controller + feedforward, same approach as UR10 node.
-        """
-        if self._jog_pub is None or self._latest_joints is None:
-            return
-
-        error = target - self._latest_joints
-        velocities = self._servo_gain * error
-
-        if self._last_target is not None:
-            dt = 1.0 / 15.0
-            feedforward = (target - self._last_target) / dt
-            velocities = velocities + feedforward
-
-        self._last_target = target.copy()
-
-        msg = JointJog()
-        msg.header.stamp = self.get_clock().now().to_msg()
-        msg.header.frame_id = TM12S_PLANNING_FRAME
-        msg.joint_names = list(TM12S_JOINT_NAMES)
-        msg.velocities = velocities.tolist()
-        self._jog_pub.publish(msg)
-
-    def _servo_status_cb(self, msg: Int8) -> None:
-        """Log MoveIt Servo status warnings."""
-        if msg.data != 0:
-            self.get_logger().warn(
-                f"MoveIt Servo status: {msg.data}", throttle_duration_sec=2.0
-            )
+        msg = Float64MultiArray()
+        msg.data = joint_angles.tolist()
+        self._joint_target_pub.publish(msg)
 
 
 def main(args=None):
@@ -486,9 +435,7 @@ def main(args=None):
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        node.get_logger().info("Shutdown requested, holding position...")
-        if node._mode == "robot":
-            node._hold_position()
+        node.get_logger().info("Shutdown requested")
     finally:
         node.destroy_node()
         rclpy.shutdown()
