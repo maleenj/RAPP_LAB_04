@@ -66,10 +66,8 @@ ros2 run xacro xacro \
 ### 3. Build VAM inference package
 
 ```bash
-docker exec -it rapp_vam bash
-cd /workspace/ros2_ws
-colcon build --symlink-install
-source install/setup.bash
+# Run from anywhere inside the container
+cd /workspace/ros2_ws && colcon build --symlink-install && source /workspace/ros2_ws/install/setup.bash
 ```
 
 ## Key Differences from UR10
@@ -114,12 +112,7 @@ Check that each joint bends in the expected direction. If a joint moves opposite
 
 ### Mode 2: Real Robot with Rosbag Skeleton Data
 
-Control the real TM12S using skeleton data from a rosbag.
-
-Unlike UR10 (where `ur_moveit_config` has built-in servo support via `launch_servo:=true`),
-the TM12S `tm12s_moveit_config` package has **no** MoveIt Servo support, and its launch
-files start a fake `ros2_control_node` that conflicts with the real driver. We use custom
-launch files from `vam_inference` that fix both issues.
+Control the real TM12S using skeleton data from a rosbag. Uses **direct PVT streaming** — VAM joint targets are sent straight to the TM12S firmware as PVT (Position-Velocity-Time) points, bypassing MoveIt Servo entirely. The firmware performs cubic spline interpolation between points for smooth 1kHz+ motion.
 
 **Important:** Do NOT use `tm12s_moveit.launch.py` or `demo.launch.py` — both start a
 fake ros2_control stack that publishes competing zero joint states, causing a "blinking
@@ -133,39 +126,29 @@ source /tm2_ws/install/setup.bash
 source /workspace/ros2_ws/install/setup.bash
 ros2 launch vam_inference tm12s_moveit_hw.launch.py robot_ip:=192.168.10.2
 
-# Terminal 2 (rapp_hw): Launch MoveIt Servo node
+# Terminal 2 (rapp_hw): PVT Streamer (bridges VAM targets to TM12S PVT mode)
 docker exec -it rapp_hw bash
 source /opt/ros/humble/setup.bash
 source /tm2_ws/install/setup.bash
 source /workspace/ros2_ws/install/setup.bash
-ros2 launch vam_inference tm12s_servo.launch.py
+ros2 run vam_inference vam_pvt_streamer
 
-# Terminal 3 (rapp_hw): Start servo + velocity streaming bridge
-docker exec -it rapp_hw bash
-source /opt/ros/humble/setup.bash
-source /tm2_ws/install/setup.bash
-source /workspace/ros2_ws/install/setup.bash
-
-ros2 service call /servo_node/start_servo std_srvs/srv/Trigger {}
-
-#   VJog bridge: differentiates servo positions into velocities, then
-#   streams them to the TM12S via ContinueVJog (native velocity mode).
-#   Waits for convergence before sending any commands to the robot.
-ros2 run vam_inference servo_to_tm_vjog_bridge
-
-# Terminal 4 (rapp_hw): Static transform — map -> world (adjust for lab)
+# Terminal 3 (rapp_hw): Static transform — map -> world (adjust for lab)
 docker exec -it rapp_hw bash
 source /opt/ros/humble/setup.bash
 ros2 run tf2_ros static_transform_publisher \
     4.4 0.1 -0.25 1.5708 0 0 map world
 
-# Terminal 5 (rapp_vam): Play rosbag — skeleton topic ONLY (no --clock!)
+ros2 run tf2_ros static_transform_publisher   4.4 0.1 -0.25 1.5708 0 0 map base
+
+
+# Terminal 4 (rapp_vam): Play rosbag — skeleton topic ONLY (no --clock!)
 docker exec -it rapp_vam bash
 source /opt/ros/humble/setup.bash
 ros2 bag play /data/rosbags/<name> \
     --topics /zed/zed_node/body_trk/skeletons --loop
 
-# Terminal 6 (rapp_vam): VAM inference
+# Terminal 5 (rapp_vam): VAM inference
 docker exec -it rapp_vam bash
 source /opt/ros/humble/setup.bash
 source /workspace/ros2_ws/install/setup.bash
@@ -176,24 +159,24 @@ The `--topics` filter is critical — it prevents the rosbag from publishing
 `/joint_states`, `/tf`, `/tf_static` which would conflict with the real robot.
 No `--clock` because the real robot operates in wall-clock time.
 
-**First-time safety:** Start with very low P-gain:
+**First-time safety:** Start with low velocity scale:
 
 ```bash
-ros2 launch vam_inference vam_tm12s_robot.launch.py servo_proportional_gain:=1.0
+ros2 run vam_inference vam_pvt_streamer --ros-args -p velocity_scale:=0.3
 ```
 
 ### Mode 3: Live Performance (camera + robot)
 
 ```bash
-# Terminals 1-4 (rapp_hw): Same as Mode 2
+# Terminals 1-3 (rapp_hw): Same as Mode 2
 
-# Terminal 5 (rapp_hw): ZED camera (replaces rosbag)
+# Terminal 4 (rapp_hw): ZED camera (replaces rosbag)
 docker exec -it rapp_hw bash
 source /opt/ros/humble/setup.bash
 source /root/ros2_ws/install/setup.bash
 ros2 launch zed_wrapper zed_camera.launch.py camera_model:=zed2i
 
-# Terminal 6 (rapp_vam): VAM inference
+# Terminal 5 (rapp_vam): VAM inference
 docker exec -it rapp_vam bash
 source /opt/ros/humble/setup.bash
 source /workspace/ros2_ws/install/setup.bash
@@ -205,39 +188,41 @@ ros2 launch vam_inference vam_tm12s_robot.launch.py
 | Launch File | Mode | Use Case |
 |---|---|---|
 | `vam_tm12s_headless.launch.py` | headless | Inference + robot_state_publishers, no RViz (run RViz from rapp_hw) |
-| `vam_tm12s_robot.launch.py` | robot | Real robot control via MoveIt Servo |
+| `vam_tm12s_robot.launch.py` | robot | VAM inference + ghost robot state publisher (no MoveIt Servo) |
 | `tm12s_moveit_hw.launch.py` | robot | MoveIt + TM driver + RViz for real hardware (replaces upstream `tm12s_moveit.launch.py`) |
-| `tm12s_servo.launch.py` | robot | MoveIt Servo node for TM12S (launched separately from move_group) |
 
-**Bridge nodes** (required for real robot — TM driver has no ros2_control hardware plugin):
+**Standalone node** (run separately in rapp_hw — needs `tm_msgs` and MoveIt planning scene):
 
-| Node | Approach | Purpose |
-|---|---|---|
-| `servo_to_tm_vjog_bridge` | **ContinueVJog** (recommended) | Differentiates servo positions → streams joint velocities via TM's native velocity mode. Smooth, no batch boundaries. |
-| `servo_to_tm_bridge` | FollowJointTrajectory (fallback) | Batches servo positions into PVT trajectory goals. May be jerky at batch boundaries. |
+| Node | Purpose |
+|---|---|
+| `vam_pvt_streamer` | Receives `/vam/joint_targets` → collision-checks via MoveIt → streams PVT points to TM12S at 10Hz. Seeds from current robot position and ramps velocity over ~1 second. |
 
 ### Key Parameters
 
-| Parameter | Default (rviz) | Default (robot) | Description |
-|---|---|---|---|
-| `servo_proportional_gain` | — | 2.0 | P-controller gain for MoveIt Servo (lower = slower) |
-| `max_joint_velocity_rad_s` | 1.0 | 2.0 | SafetyChecker pre-filter velocity limit (rad/s) |
-| `max_joint_acceleration_rad_s2` | 5.0 | 5.0 | SafetyChecker pre-filter acceleration limit (rad/s²) |
-| `prediction_stride_K` | 1 | 1 | Re-predict every K frames |
-| `ensemble_decay_weight` | 0.5 | 0.5 | Temporal smoothing (lower = smoother) |
-| `tracking_timeout_sec` | 0.5 | 0.5 | Skeleton loss detection threshold |
-| `target_skeleton_id` | -1 | -1 | Skeleton to track (-1 = auto) |
-| `joint_sign_multipliers` | [1,1,1,1,1,1] | [1,1,1,1,1,1] | Per-joint sign flip (-1 reverses direction) |
-
-**VJog bridge parameters** (`servo_to_tm_vjog_bridge`):
+**VAM inference** (`vam_tm12s_robot.launch.py`):
 
 | Parameter | Default | Description |
 |---|---|---|
-| `max_velocity_deg_s` | 30.0 | Per-joint velocity clamp (deg/s). Start low, increase after verification. |
-| `ema_alpha` | 0.3 | Velocity smoothing (0.1 = very smooth, 0.5 = responsive) |
-| `send_rate_hz` | 30.0 | Rate for sending velocity commands to TM |
-| `convergence_threshold_rad` | 0.05 | Servo must be within this of robot before streaming starts |
-| `watchdog_timeout_sec` | 0.3 | Stop robot if no servo data for this long |
+| `prediction_stride_K` | 1 | Re-predict every K frames |
+| `ensemble_decay_weight` | 0.5 | Temporal smoothing (lower = smoother) |
+| `max_joint_velocity_rad_s` | 2.0 | SafetyChecker pre-filter velocity limit (rad/s) |
+| `max_joint_acceleration_rad_s2` | 5.0 | SafetyChecker pre-filter acceleration limit (rad/s²) |
+| `tracking_timeout_sec` | 0.5 | Skeleton loss detection threshold |
+| `target_skeleton_id` | -1 | Skeleton to track (-1 = auto) |
+| `trajectory_lookahead_frames` | 5 | Frames to look ahead in trajectory |
+
+**PVT streamer** (`vam_pvt_streamer`):
+
+| Parameter | Default | Description |
+|---|---|---|
+| `pvt_rate_hz` | 10.0 | PVT point send rate (Hz). Each point = 1/rate seconds. |
+| `velocity_scale` | 0.3 | Fraction of TM12S hardware velocity limits (0.0–1.0). Start low! |
+| `catch_up_threshold_rad` | 0.3 | Position gap (rad) that triggers MoveIt catch-up trajectory |
+| `catch_up_velocity_scale` | 1.0 | MoveIt velocity scaling during catch-up (0.0–1.0) |
+| `watchdog_timeout_sec` | 0.5 | Hold position if no target for this long |
+| `holding_timeout_sec` | 2.0 | Return to IDLE after holding this long |
+| `collision_perturbation_rad` | 0.08 | Perturbation radius for finding collision-free alternatives |
+| `collision_candidates` | 8 | Number of random alternatives to try when target is in collision |
 
 ## Sign Conventions
 
@@ -260,35 +245,37 @@ ros2 launch vam_inference vam_tm12s_robot.launch.py \
 
 ## Safety Architecture
 
-Robot mode uses **MoveIt Servo** as the primary safety layer, with TM12SSafetyChecker as defense-in-depth:
+Robot mode uses a **layered safety approach** — the PVT streamer handles motion safety, MoveIt provides collision checking, and the TM12S firmware enforces hardware limits:
 
-**MoveIt Servo (primary — 250Hz):**
+**PVT Streamer (motion control — 10Hz):**
 
-1. **Self-collision avoidance** — Full URDF collision model, scales/stops before collision
-2. **Joint limit enforcement** — 0.1 rad margin from limits
-3. **Singularity detection** — Scales velocity near singular configurations
-4. **Butterworth smoothing** — Low-pass filter eliminates high-frequency jitter
-5. **Auto-halt on timeout** — Stops robot if commands stop for >0.1s
+1. **Velocity clamping** — Per-joint limits at configurable fraction of hardware max (default 30%)
+2. **Acceleration ramping** — Velocity changes by max 10% of max_vel per tick (~1 second to reach full speed from standstill)
+3. **Position seeding** — First PVT point always matches robot's current position with zero velocity (prevents CPERR 241 jumps)
+4. **Watchdog** — Holds position if no VAM target for 500ms
+5. **Catch-up via MoveIt** — If robot is far from target (>0.3 rad), uses MoveIt trajectory planning instead of PVT streaming
 
-**TM12SSafetyChecker (pre-filter — 15Hz, joint_limits_only in robot mode):**
+**MoveIt Planning Scene (collision checking):**
+
+1. **Self-collision checking** — Every PVT target is validated via `/check_state_validity`
+2. **Alternative path finding** — When target is in collision, tries nearby collision-free positions
+3. **Persistent collision hold** — After 5 consecutive collisions, holds position
+
+**TM12SSafetyChecker (pre-filter in VAM node — 15Hz):**
 
 1. **Joint limit clamping** — TM12S URDF limits (joint_3 narrower: ±162°)
 2. **Per-joint velocity limits** — [2.27, 2.27, 3.67, 3.93, 3.93, 7.85] rad/s
-3. Velocity/acceleration limiting disabled in robot mode (MoveIt Servo handles this)
 
-Additional protections:
+**TM12S firmware (final layer):**
 
-- **SafetyChecker seeded** with robot's actual position on startup (prevents first-frame jump)
-- **Hold-position on tracking loss** — Zero-velocity JointJog on skeleton timeout
-- **Graceful shutdown** — Ctrl+C sends hold-position before exiting
-- **TM12S built-in safety** — The robot controller rejects commands violating its internal limits
+- Rejects commands violating hardware limits (CPERR errors)
+- Cubic spline interpolation between PVT points at 1kHz+ servo rate
 
 ## TM12S-Specific Configuration Files
 
 | File | Purpose |
 |---|---|
-| `ros2_ws/src/vam_inference/config/tm12s_servo_vam.yaml` | MoveIt Servo config (ForwardCommandController) |
-| `ros2_ws/src/vam_inference/config/tm12s_servo_vam_traj.yaml` | Fallback Servo config (JointTrajectory output) |
+| `ros2_ws/src/vam_inference/vam_inference/vam_pvt_streamer.py` | PVT streamer node (VAM targets → TM12S PVT mode) |
 | `ros2_ws/src/vam_inference/config/tm12s_ros2_controllers.yaml` | ros2_control config with forward_position_controller |
 | `vam_utils/data/robot_configs.py` | TM12S joint names, limits, velocities |
 | `docker/zed/Dockerfile.desktop-humble` | Hardware container Dockerfile (ZED + TM2 driver) |
@@ -304,10 +291,6 @@ If unsure which controller setup works:
 ros2 control list_controllers
 ros2 control list_hardware_interfaces
 ```
-
-Position command interfaces (`joint_N/position [available]`) confirm ForwardCommandController will work. Use `tm12s_servo_vam.yaml`.
-
-If only trajectory controller is available, use `tm12s_servo_vam_traj.yaml` instead.
 
 ## Container Management
 
@@ -370,4 +353,4 @@ TM12S joint_3 has narrower range (±162°) than UR10 elbow (±180°). The safety
 
 ---
 
-**Status:** Pipeline configured. Pending real-robot verification and sign convention calibration.
+**Status:** Pipeline operational. Direct PVT streaming verified on real TM12S hardware.

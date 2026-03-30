@@ -54,10 +54,12 @@ from vam_utils.inference import (
 )
 from vam_utils.inference.tm12s_safety_checker import TM12SSafetyChecker
 
-# Frame for skeleton TF transform — must match what the model was trained on.
-# The UR10 node uses "base_link"; we must use the same frame so the model
-# sees the same skeleton orientation regardless of which robot URDF is loaded.
-SKELETON_TRANSFORM_FRAME = "base_link"
+# Frame for skeleton TF transform — the model was trained with skeletons in
+# the UR10 "base_link" frame. On TM12S the equivalent frame is "base" (there
+# is no "base_link" in the TM12S URDF). Both frames sit at the robot's
+# mounting surface with Z-up, so the skeleton orientation seen by the model
+# is identical.
+SKELETON_TRANSFORM_FRAME = "base"
 
 
 class VAMTM12SInferenceNode(Node):

@@ -9,11 +9,7 @@ Prerequisites (run in separate terminals in rapp_hw container):
     # 1. MoveIt + TM12S driver + RViz (no fake ros2_control)
     ros2 launch vam_inference tm12s_moveit_hw.launch.py robot_ip:=192.168.10.2
 
-    # 2. Static transform — map → world (camera-to-robot, adjust for lab)
-    ros2 run tf2_ros static_transform_publisher \\
-        4.4 0.1 -0.25 1.5708 0 0 map world
-
-    # 3. Rosbag skeleton data (from rapp_vam container)
+    # 2. Rosbag skeleton data (from rapp_vam container)
     ros2 bag play /data/rosbags/<name> \\
         --topics /zed/zed_node/body_trk/skeletons --loop
 
@@ -157,6 +153,25 @@ def generate_launch_description():
                 ],
                 remappings=[
                     ("joint_states", "/vam/joint_states"),
+                ],
+            ),
+
+            # --- Static transform: map → world (camera-to-robot calibration) ---
+            # Must match the headless launch. Uses --roll (X-axis rotation),
+            # NOT yaw. The old manual prerequisite used positional args
+            # (x y z yaw pitch roll) which applied 1.5708 as yaw incorrectly.
+            Node(
+                package="tf2_ros",
+                executable="static_transform_publisher",
+                name="map_to_world",
+                arguments=[
+                    "--x", "4.4", "--y", "0.1", "--z", "-0.25",
+                    "--roll", "1.5708", "--pitch", "0", "--yaw", "0",
+                    "--frame-id", "map",
+                    "--child-frame-id", "world",
+                ],
+                parameters=[
+                    {"use_sim_time": LaunchConfiguration("use_sim_time")}
                 ],
             ),
 
