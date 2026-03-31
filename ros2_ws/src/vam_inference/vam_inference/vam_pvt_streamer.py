@@ -91,6 +91,7 @@ class VamPvtStreamer(Node):
         self.declare_parameter("holding_timeout_sec", 2.0)
         self.declare_parameter("collision_perturbation_rad", 0.08)
         self.declare_parameter("collision_candidates", 8)
+        self.declare_parameter("filter_cutoff_hz", 2.0)
 
         self._pvt_rate = self.get_parameter("pvt_rate_hz").value
         self._vel_scale = self.get_parameter("velocity_scale").value
@@ -101,6 +102,23 @@ class VamPvtStreamer(Node):
         self._holding_timeout = self.get_parameter("holding_timeout_sec").value
         self._collision_perturb = self.get_parameter("collision_perturbation_rad").value
         self._collision_candidates = self.get_parameter("collision_candidates").value
+        self._filter_cutoff = self.get_parameter("filter_cutoff_hz").value
+
+        # 2nd-order Butterworth low-pass (biquad) — manual coefficients
+        # Avoids scipy dependency
+        omega = 2.0 * math.pi * self._filter_cutoff / self._pvt_rate
+        omega_w = math.tan(omega / 2.0)  # pre-warped frequency
+        k = omega_w * omega_w
+        q = math.sqrt(2.0)  # Q for Butterworth
+        norm = 1.0 / (1.0 + omega_w / q + k)
+        self._b0 = k * norm
+        self._b1 = 2.0 * self._b0
+        self._b2 = self._b0
+        self._a1 = 2.0 * (k - 1.0) * norm
+        self._a2 = (1.0 - omega_w / q + k) * norm
+        # Per-joint filter state: [x1, x2, y1, y2]
+        self._filter_state = np.zeros((N_JOINTS, 4))
+        self._filter_initialized = False
 
         self._dt = 1.0 / self._pvt_rate
         self._max_vel = TM12S_HW_VEL_LIMITS * self._vel_scale
@@ -606,6 +624,29 @@ class VamPvtStreamer(Node):
                 )
 
     # ------------------------------------------------------------------
+    # Target filtering
+    # ------------------------------------------------------------------
+
+    def _filter_target(self, target):
+        """Apply 2nd-order Butterworth low-pass filter per joint to remove jitter."""
+        if not self._filter_initialized:
+            # Initialize filter state to the first target value
+            # (avoids a transient spike from zero → first target)
+            for j in range(N_JOINTS):
+                self._filter_state[j] = [target[j], target[j], target[j], target[j]]
+            self._filter_initialized = True
+
+        filtered = np.empty(N_JOINTS)
+        for j in range(N_JOINTS):
+            x0 = target[j]
+            x1, x2, y1, y2 = self._filter_state[j]
+            # Direct Form I biquad
+            y0 = self._b0 * x0 + self._b1 * x1 + self._b2 * x2 - self._a1 * y1 - self._a2 * y2
+            self._filter_state[j] = [x0, x1, y0, y1]
+            filtered[j] = y0
+        return filtered
+
+    # ------------------------------------------------------------------
     # PVT streaming core
     # ------------------------------------------------------------------
 
@@ -637,8 +678,13 @@ class VamPvtStreamer(Node):
             )
             return
 
+        # Low-pass filter the target to remove high-frequency jitter
+        safe_target = self._filter_target(safe_target)
+
         # Desired velocity toward target (from last SENT position, not current)
-        desired_vel = (safe_target - prev) / self._dt
+        # Normalize to [-π, π] to take shortest angular path
+        error = (safe_target - prev + np.pi) % (2 * np.pi) - np.pi
+        desired_vel = error / self._dt
 
         # 1. Clamp velocity magnitude
         desired_vel = np.clip(desired_vel, -self._max_vel, self._max_vel)

@@ -111,7 +111,7 @@ TM12S_CONFIG = RobotConfig(
     # Angular offsets to align zero positions between UR10 and TM12S.
     # Joints 2,4 have +π/2 offset; joint 5 has π offset.
     #joint_offsets=[0.0, np.pi / 2, 0.0, np.pi / 2, np.pi, 0.0],
-    joint_offsets=[0.0, 3*(np.pi / 2), 0.0 , np.pi / 2, np.pi, np.pi],
+    joint_offsets=[-np.pi, 3*(np.pi / 2), 0.0 , np.pi / 2, np.pi, np.pi],
 )
 
 
