@@ -107,8 +107,8 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "max_joint_velocity_rad_s",
                 default_value="2.0",
-                description="SafetyChecker pre-filter velocity limit (rad/s). "
-                "TM12S joints have varying limits (2.27–7.85 rad/s).",
+                description="SafetyChecker velocity limit (rad/s). Must stay in sync "
+                "with PVT velocity_scale to prevent drift/CPERR 241.",
             ),
             DeclareLaunchArgument(
                 "max_joint_acceleration_rad_s2",
@@ -118,11 +118,11 @@ def generate_launch_description():
             DeclareLaunchArgument("tracking_timeout_sec", default_value="0.5"),
             DeclareLaunchArgument("trajectory_lookahead_frames", default_value="5"),
             DeclareLaunchArgument(
-                "pvt_rate_hz", default_value="10.0",
+                "pvt_rate_hz", default_value="15.0",
                 description="PVT streaming rate in Hz",
             ),
             DeclareLaunchArgument(
-                "velocity_scale", default_value="0.7",
+                "velocity_scale", default_value="0.1",
                 description="Fraction of TM12S hardware velocity limits to use",
             ),
             DeclareLaunchArgument(
@@ -132,6 +132,47 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "catch_up_velocity_scale", default_value="1.0",
                 description="MoveIt velocity scaling during catch-up (0.0-1.0)",
+            ),
+            DeclareLaunchArgument(
+                "filter_type", default_value="feedback",
+                description="Smoothing filter: 'feedback' (P-controller, like UR10), 'one_euro', or 'ema'.",
+            ),
+            DeclareLaunchArgument(
+                "feedback_gain", default_value="3.0",
+                description="Feedback smoother Kp. Higher = more responsive. Lower = smoother.",
+            ),
+            DeclareLaunchArgument(
+                "feedback_max_vel", default_value="1.4",
+                description="Feedback smoother max velocity (rad/s). Rule: ≈ velocity_scale × 2.0. "
+                "1.4 matches velocity_scale=0.7.",
+            ),
+            DeclareLaunchArgument(
+                "smoothing_alpha", default_value="0.3",
+                description="EMA smoothing factor (only used if filter_type=ema).",
+            ),
+            DeclareLaunchArgument(
+                "one_euro_min_cutoff", default_value="0.4",
+                description="One-Euro min cutoff Hz. Lower = smoother when slow (0.15=heavy, 0.4=moderate, 1.0=light).",
+            ),
+            DeclareLaunchArgument(
+                "one_euro_beta", default_value="0.1",
+                description="One-Euro speed coefficient. Higher = more responsive when fast (0.01=smooth, 0.05=balanced, 0.1=fast).",
+            ),
+            DeclareLaunchArgument(
+                "one_euro_d_cutoff", default_value="1.0",
+                description="One-Euro derivative cutoff Hz. Usually leave at 1.0.",
+            ),
+            DeclareLaunchArgument(
+                "max_drift_deg", default_value="1.5",
+                description="Max drift (deg) between sent and actual position before re-anchoring. Prevents CPERR 241.",
+            ),
+            DeclareLaunchArgument(
+                "deadzone_rad", default_value="0.12",
+                description="Stillness deadzone (rad). Target changes below this are suppressed. 0.12 rad ≈ 6.9°.",
+            ),
+            DeclareLaunchArgument(
+                "still_frames_threshold", default_value="2",
+                description="Consecutive frames within deadzone before locking position.",
             ),
             DeclareLaunchArgument("use_sim_time", default_value="false"),
 
@@ -244,6 +285,21 @@ def generate_launch_description():
                         "trajectory_lookahead_frames": LaunchConfiguration(
                             "trajectory_lookahead_frames"
                         ),
+                        "filter_type": LaunchConfiguration("filter_type"),
+                        "feedback_gain": LaunchConfiguration("feedback_gain"),
+                        "feedback_max_vel": LaunchConfiguration("feedback_max_vel"),
+                        "smoothing_alpha": LaunchConfiguration("smoothing_alpha"),
+                        "one_euro_min_cutoff": LaunchConfiguration(
+                            "one_euro_min_cutoff"
+                        ),
+                        "one_euro_beta": LaunchConfiguration("one_euro_beta"),
+                        "one_euro_d_cutoff": LaunchConfiguration(
+                            "one_euro_d_cutoff"
+                        ),
+                        "deadzone_rad": LaunchConfiguration("deadzone_rad"),
+                        "still_frames_threshold": LaunchConfiguration(
+                            "still_frames_threshold"
+                        ),
                         "use_sim_time": LaunchConfiguration("use_sim_time"),
                     }
                 ],
@@ -254,7 +310,8 @@ def generate_launch_description():
             #   ros2 run vam_inference vam_pvt_streamer
             # Or with parameters:
             #   ros2 run vam_inference vam_pvt_streamer --ros-args \
-            #       -p pvt_rate_hz:=10.0 -p velocity_scale:=0.7 \
-            #       -p catch_up_threshold_rad:=0.3 -p catch_up_velocity_scale:=1.0
+            #       -p pvt_rate_hz:=15.0 -p velocity_scale:=0.1 \
+            #       -p catch_up_threshold_rad:=0.3 -p catch_up_velocity_scale:=0.2 \
+            #       -p max_drift_deg:=8.0
         ]
     )

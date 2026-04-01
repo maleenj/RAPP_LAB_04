@@ -55,8 +55,9 @@ services:
       - ${HOME}/.Xauthority:/root/.Xauthority:rw
       - /dev/dri:/dev/dri:rw
 
+    privileged: true
     devices:
-      - /dev/dri:/dev/dri
+      - /dev:/dev
 
     stdin_open: true
     tty: true

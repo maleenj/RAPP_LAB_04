@@ -53,8 +53,9 @@ services:
       # GPU device files
       - /dev/dri:/dev/dri:rw
 
+    privileged: true
     devices:
-      - /dev/dri:/dev/dri
+      - /dev:/dev
 
     stdin_open: true
     tty: true

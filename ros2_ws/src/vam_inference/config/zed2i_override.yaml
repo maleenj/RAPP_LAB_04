@@ -1,0 +1,17 @@
+# ZED2i parameter overrides for RAPP Lab 04
+# Used with: ros_params_override_path argument in zed_camera.launch.py
+
+---
+/**:
+    ros__parameters:
+        body_tracking:
+            bt_enabled: true
+            model: 'HUMAN_BODY_MEDIUM'
+            body_format: 'BODY_18'
+            enable_body_fitting: true
+            enable_tracking: true
+            body_kp_selection: 'FULL'
+            confidence_threshold: 50.0
+            minimum_keypoints_threshold: 5
+            max_range: 15.0
+            prediction_timeout_s: 0.5

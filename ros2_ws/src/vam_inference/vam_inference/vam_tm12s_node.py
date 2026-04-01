@@ -53,6 +53,7 @@ from vam_utils.inference import (
     TemporalEnsemble,
 )
 from vam_utils.inference.tm12s_safety_checker import TM12SSafetyChecker
+from vam_utils.inference.one_euro_filter import OneEuroFilter
 
 # Frame for skeleton TF transform — the model was trained with skeletons in
 # the UR10 "base_link" frame. On TM12S the equivalent frame is "base" (there
@@ -81,8 +82,17 @@ class VAMTM12SInferenceNode(Node):
         self.declare_parameter("device", "cuda")
         self.declare_parameter("prediction_stride_K", 1)
         self.declare_parameter("ensemble_decay_weight", 0.5)
-        self.declare_parameter("max_joint_velocity_rad_s", 1.0)
+        self.declare_parameter("max_joint_velocity_rad_s", 2.0)
         self.declare_parameter("max_joint_acceleration_rad_s2", 5.0)
+        self.declare_parameter("smoothing_alpha", 0.3)
+        self.declare_parameter("filter_type", "feedback")  # "feedback", "one_euro", or "ema"
+        self.declare_parameter("feedback_gain", 3.0)
+        self.declare_parameter("feedback_max_vel", 1.4)
+        self.declare_parameter("one_euro_min_cutoff", 0.4)
+        self.declare_parameter("one_euro_beta", 0.1)
+        self.declare_parameter("one_euro_d_cutoff", 1.0)
+        self.declare_parameter("deadzone_rad", 0.12)
+        self.declare_parameter("still_frames_threshold", 2)
         self.declare_parameter("target_skeleton_id", -1)
         self.declare_parameter("tracking_timeout_sec", 0.5)
         self.declare_parameter("trajectory_lookahead_frames", 5)
@@ -137,13 +147,18 @@ class VAMTM12SInferenceNode(Node):
             K=config.prediction_stride_K,
             decay_weight=config.ensemble_decay_weight,
         )
-        # In robot mode, MoveIt Servo handles velocity/acceleration/collision
-        # safety — TM12SSafetyChecker only does joint limit clamping.
+        # In feedback mode: joint_limits_only=True because the feedback
+        # smoother already rate-limits targets (max_vel parameter). Adding
+        # safety checker velocity/accel limiting on top causes stop-start
+        # jerkiness from the two limiters fighting each other.
+        # In other modes: full safety checking needed to prevent CPERR 241.
+        self._filter_type = self.get_parameter("filter_type").value
+        use_joint_limits_only = False
         self._safety = TM12SSafetyChecker(
             max_joint_velocity_rad_s=config.max_joint_velocity_rad_s,
             max_joint_acceleration_rad_s2=config.max_joint_acceleration_rad_s2,
             dt=config.frame_dt,
-            joint_limits_only=(self._mode == "robot"),
+            joint_limits_only=use_joint_limits_only,
         )
         model_type_str = "skeleton_only" if self._skeleton_only else "skeleton+joints"
         self.get_logger().info(
@@ -153,6 +168,40 @@ class VAMTM12SInferenceNode(Node):
             f"joint_offsets={[round(o, 3) for o in self._joint_offsets.tolist()]}"
         )
 
+        # --- Smoothing filter ---
+        self._smoothing_alpha = self.get_parameter("smoothing_alpha").value
+        self._ema_target: np.ndarray | None = None
+        self._feedback_gain = self.get_parameter("feedback_gain").value
+        self._feedback_max_vel = self.get_parameter("feedback_max_vel").value
+        self._feedback_dt = 1.0 / 15.0
+        self._one_euro = OneEuroFilter(
+            n_signals=6,
+            rate=15.0,
+            min_cutoff=self.get_parameter("one_euro_min_cutoff").value,
+            beta=self.get_parameter("one_euro_beta").value,
+            d_cutoff=self.get_parameter("one_euro_d_cutoff").value,
+        )
+        if self._filter_type == "feedback":
+            self.get_logger().info(
+                f"Filter: feedback (Kp={self._feedback_gain}, "
+                f"max_vel={self._feedback_max_vel} rad/s)"
+            )
+        elif self._filter_type == "one_euro":
+            self.get_logger().info(
+                f"Filter: one_euro (min_cutoff={self._one_euro.min_cutoff}, "
+                f"beta={self._one_euro.beta})"
+            )
+        else:
+            self.get_logger().info(
+                f"Filter: ema (alpha={self._smoothing_alpha})"
+            )
+
+        # --- Stillness / deadzone detection ---
+        self._deadzone_rad = self.get_parameter("deadzone_rad").value
+        self._still_frames_thresh = self.get_parameter("still_frames_threshold").value
+        self._stable_target: np.ndarray | None = None
+        self._still_count = 0
+
         # --- State ---
         self._latest_skeleton: np.ndarray | None = None  # [48]
         self._latest_joints: np.ndarray | None = None  # [6]
@@ -160,6 +209,7 @@ class VAMTM12SInferenceNode(Node):
         self._joints_stamp: Time | None = None
         self._pipeline_active = False
         self._safety_seeded = False
+        self._frame_count = 0
 
         # --- TF2 for coordinate transforms ---
         self._tf_buffer = tf2_ros.Buffer()
@@ -342,6 +392,77 @@ class VAMTM12SInferenceNode(Node):
             # encoder range. Without this, offsets like 3π/2 produce values
             # ~5 rad away from the encoder reading for the same physical pose.
             target = np.arctan2(np.sin(target), np.cos(target))
+
+            raw_target = target.copy()  # before any filtering
+
+            # Apply safety limits (joint limits + velocity/accel clamping)
+            report = self._safety.check(target)
+            if report.warnings:
+                for w in report.warnings[:1]:
+                    self.get_logger().warn(w)
+            target = report.target
+
+            post_safety = target.copy()
+
+            # --- Smoothing filter ---
+            if self._filter_type == "feedback" and self._latest_joints is not None:
+                # Feedback-based smoother: P-controller from actual joints.
+                # Output is always within max_vel*dt of actual — bounded, no drift.
+                # The PVT Butterworth filter smooths any stepping.
+                error = target - self._latest_joints
+                velocity = self._feedback_gain * error
+                velocity = np.clip(velocity, -self._feedback_max_vel,
+                                   self._feedback_max_vel)
+                target = self._latest_joints + velocity * self._feedback_dt
+            elif self._filter_type == "one_euro":
+                target = self._one_euro(target)
+            else:
+                if self._ema_target is None:
+                    self._ema_target = target.copy()
+                else:
+                    self._ema_target = (self._smoothing_alpha * target
+                                        + (1.0 - self._smoothing_alpha)
+                                        * self._ema_target)
+                target = self._ema_target
+
+            post_filter = target.copy()
+
+            # Deadzone (skipped for feedback filter — feedback loop handles it)
+            if self._filter_type != "feedback":
+                if self._stable_target is None:
+                    self._stable_target = target.copy()
+                    self._still_count = 0
+                delta = np.max(np.abs(target - self._stable_target))
+                if delta < self._deadzone_rad:
+                    self._still_count += 1
+                    if self._still_count >= self._still_frames_thresh:
+                        target = self._stable_target
+                else:
+                    self._stable_target = target.copy()
+                    self._still_count = 0
+
+            # --- Diagnostic logging ---
+            self._frame_count += 1
+            if self._latest_joints is not None and (
+                self._frame_count <= 5 or self._frame_count % 30 == 0
+            ):
+                actual = self._latest_joints
+                # Max error at each stage (degrees)
+                raw_err = np.degrees(np.max(np.abs(raw_target - actual)))
+                safety_err = np.degrees(np.max(np.abs(post_safety - raw_target)))
+                filter_err = np.degrees(np.max(np.abs(post_filter - post_safety)))
+                final_err = np.degrees(np.max(np.abs(target - actual)))
+                # Per-joint final error
+                per_joint = np.degrees(target - actual)
+                jstr = " ".join(f"{e:+.1f}" for e in per_joint)
+                self.get_logger().info(
+                    f"F#{self._frame_count}: "
+                    f"raw→act={raw_err:.1f}° "
+                    f"safety_clip={safety_err:.1f}° "
+                    f"filter_lag={filter_err:.1f}° "
+                    f"final→act={final_err:.1f}° "
+                    f"[{jstr}]"
+                )
 
             # Publish predicted joint state (always, for RViz)
             self._publish_joint_state(target)

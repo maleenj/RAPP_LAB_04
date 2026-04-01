@@ -164,7 +164,7 @@ class VamPvtStreamer(Node):
 
         # MoveGroup action client for catch-up trajectories
         self._move_group_cli = ActionClient(
-            self, MoveGroup, "/move_group",
+            self, MoveGroup, "/move_action",
             callback_group=self._cb_group,
         )
 
@@ -200,13 +200,13 @@ class VamPvtStreamer(Node):
             )
 
         self._move_group_available = self._move_group_cli.wait_for_server(
-            timeout_sec=2.0
+            timeout_sec=10.0
         )
         if self._move_group_available:
-            self.get_logger().info("/move_group action server available")
+            self.get_logger().info("/move_action action server available")
         else:
             self.get_logger().warn(
-                "/move_group NOT available — "
+                "/move_action NOT available — "
                 "catch-up will use direct PVT instead of MoveIt planning"
             )
 
@@ -395,7 +395,7 @@ class VamPvtStreamer(Node):
             )
         if not self._move_group_available:
             self.get_logger().warn(
-                "CATCH-UP: /move_group not available — skipping, "
+                "CATCH-UP: /move_action not available — skipping, "
                 "will stream directly (robot may be far from target)"
             )
             return True  # proceed to streaming anyway
@@ -716,12 +716,16 @@ class VamPvtStreamer(Node):
         self._last_sent_vel = velocity.copy()
         self._cmds_sent += 1
 
-        if self._cmds_sent <= 10 or self._cmds_sent % 100 == 0:
-            max_vel_deg = math.degrees(np.max(np.abs(velocity)))
-            gap = np.max(np.abs(target - current))
+        drift_deg = math.degrees(np.max(np.abs(next_pos - current)))
+        gap_deg = math.degrees(np.max(np.abs(target - current)))
+        max_vel_deg = math.degrees(np.max(np.abs(velocity)))
+
+        if self._cmds_sent <= 10 or self._cmds_sent % 50 == 0:
             self.get_logger().info(
-                f"PVT #{self._cmds_sent}: max_vel={max_vel_deg:.1f} deg/s, "
-                f"gap={math.degrees(gap):.1f} deg"
+                f"PVT #{self._cmds_sent}: "
+                f"vel={max_vel_deg:.1f}°/s, "
+                f"gap={gap_deg:.1f}°, "
+                f"drift={drift_deg:.1f}°"
             )
 
     # ------------------------------------------------------------------
