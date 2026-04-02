@@ -82,7 +82,7 @@ class VamPvtStreamer(Node):
         super().__init__("vam_pvt_streamer")
 
         # Parameters
-        self.declare_parameter("pvt_rate_hz", 10.0)
+        self.declare_parameter("pvt_rate_hz", 15.0)
         self.declare_parameter("velocity_scale", 0.3)
         self.declare_parameter("accel_scale", 0.3)
         self.declare_parameter("catch_up_threshold_rad", 0.3)
@@ -164,7 +164,7 @@ class VamPvtStreamer(Node):
 
         # MoveGroup action client for catch-up trajectories
         self._move_group_cli = ActionClient(
-            self, MoveGroup, "/move_action",
+            self, MoveGroup, "/move_group",
             callback_group=self._cb_group,
         )
 

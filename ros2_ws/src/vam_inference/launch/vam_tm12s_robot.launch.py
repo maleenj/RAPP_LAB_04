@@ -105,6 +105,11 @@ def generate_launch_description():
             DeclareLaunchArgument("prediction_stride_K", default_value="1"),
             DeclareLaunchArgument("ensemble_decay_weight", default_value="0.5"),
             DeclareLaunchArgument(
+                "control_rate_hz", default_value="30.0",
+                description="VAM node control loop rate (Hz). Higher = smoother output. "
+                "Skeleton input is 15Hz; node reuses latest between frames.",
+            ),
+            DeclareLaunchArgument(
                 "max_joint_velocity_rad_s",
                 default_value="2.0",
                 description="SafetyChecker velocity limit (rad/s). Must stay in sync "
@@ -269,6 +274,9 @@ def generate_launch_description():
                         ),
                         "ensemble_decay_weight": LaunchConfiguration(
                             "ensemble_decay_weight"
+                        ),
+                        "control_rate_hz": LaunchConfiguration(
+                            "control_rate_hz"
                         ),
                         "max_joint_velocity_rad_s": LaunchConfiguration(
                             "max_joint_velocity_rad_s"

@@ -50,6 +50,10 @@ services:
       - /home/maleen/models/rapplab04:/data/models:rw
       - /home/maleen/models/rapplab04/logs:/data/logs:rw
 
+      # ZED SDK cache (calibration files + optimized AI models)
+      - zed_calibration:/usr/local/zed/settings:rw
+      - zed_resources:/usr/local/zed/resources:rw
+
       # X11 for RViz
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - ${HOME}/.Xauthority:/root/.Xauthority:rw
@@ -72,3 +76,7 @@ services:
 
     shm_size: '8gb'
     restart: unless-stopped
+
+volumes:
+  zed_calibration:
+  zed_resources:

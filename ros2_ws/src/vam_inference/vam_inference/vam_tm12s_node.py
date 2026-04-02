@@ -82,6 +82,7 @@ class VAMTM12SInferenceNode(Node):
         self.declare_parameter("device", "cuda")
         self.declare_parameter("prediction_stride_K", 1)
         self.declare_parameter("ensemble_decay_weight", 0.5)
+        self.declare_parameter("control_rate_hz", 30.0)
         self.declare_parameter("max_joint_velocity_rad_s", 2.0)
         self.declare_parameter("max_joint_acceleration_rad_s2", 5.0)
         self.declare_parameter("smoothing_alpha", 0.3)
@@ -131,6 +132,7 @@ class VAMTM12SInferenceNode(Node):
             max_joint_acceleration_rad_s2=self.get_parameter(
                 "max_joint_acceleration_rad_s2"
             ).value,
+            control_rate_hz=self.get_parameter("control_rate_hz").value,
         )
 
         # --- Load model and create pipeline components ---
@@ -173,7 +175,8 @@ class VAMTM12SInferenceNode(Node):
         self._ema_target: np.ndarray | None = None
         self._feedback_gain = self.get_parameter("feedback_gain").value
         self._feedback_max_vel = self.get_parameter("feedback_max_vel").value
-        self._feedback_dt = 1.0 / 15.0
+        self._control_rate = self.get_parameter("control_rate_hz").value
+        self._feedback_dt = 1.0 / self._control_rate
         self._one_euro = OneEuroFilter(
             n_signals=6,
             rate=15.0,
@@ -251,8 +254,8 @@ class VAMTM12SInferenceNode(Node):
             )
 
         # --- 15 Hz timer ---
-        self._timer = self.create_timer(1.0 / 15.0, self._timer_cb)
-        self.get_logger().info("VAM TM12S inference node started at 15 Hz")
+        self._timer = self.create_timer(1.0 / self._control_rate, self._timer_cb)
+        self.get_logger().info(f"VAM TM12S inference node started at {self._control_rate:.0f} Hz")
 
     # ------------------------------------------------------------------
     # Subscriber callbacks
