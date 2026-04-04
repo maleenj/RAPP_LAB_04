@@ -105,13 +105,13 @@ TM12S_CONFIG = RobotConfig(
     move_group_name="tmr_arm",
     planning_frame="base",
     ee_frame="flange",
-    # Sign flips from FK analysis (UR10 vs TM12S joint axes in world frame).
-    # Joints 5, 6 rotate opposite to UR10 counterparts.
-    sign_multipliers=[1.0, -1.0, -1.0, 1.0, -1.0, 1.0],
-    # Angular offsets to align zero positions between UR10 and TM12S.
-    # Joints 2,4 have +π/2 offset; joint 5 has π offset.
-    #joint_offsets=[0.0, np.pi / 2, 0.0, np.pi / 2, np.pi, 0.0],
-    joint_offsets=[-np.pi, 3*(np.pi / 2), 0.0 , np.pi / 2, np.pi, np.pi],
+    # --- No mapping needed: model trained on native TM12S joint data ---
+    sign_multipliers=[1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+    joint_offsets=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    # --- OLD UR10→TM12S mapping (kept for reference) ---
+    # sign_multipliers=[1.0, -1.0, -1.0, 1.0, -1.0, 1.0],
+    # joint_offsets=[-np.pi, 3*(np.pi / 2), 0.0 , np.pi / 2, np.pi, np.pi],
+    # joint_offsets=[0.0, np.pi / 2, 0.0, np.pi / 2, np.pi, 0.0],
 )
 
 

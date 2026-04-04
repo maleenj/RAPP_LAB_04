@@ -32,7 +32,7 @@ class InputAssembler:
             assembler.add_frame(skeleton_frame)
 
             if assembler.is_ready():
-                input_tensor = assembler.get_input_tensor()  # [1, T_in, 48]
+                input_tensor = assembler.get_input_tensor()  # [1, T_in, skeleton_dim]
     """
 
     def __init__(
@@ -59,8 +59,8 @@ class InputAssembler:
         """Add a single frame of observations.
 
         Args:
-            skeleton: shape [48] — 16 keypoints x 3 coordinates, in physical
-                units (meters, robot_base_link frame).
+            skeleton: shape [skeleton_dim] — keypoints x 3 coordinates, in physical
+                units (meters, robot base frame).
             joints: shape [6] — 6 joint angles in radians. Ignored when
                 skeleton_only=True.
         """
@@ -82,7 +82,7 @@ class InputAssembler:
 
         Returns:
             torch.Tensor of shape [1, T_in, 54] (default) or
-            [1, T_in, 48] (skeleton_only), normalized using training statistics.
+            [1, T_in, skeleton_dim] (skeleton_only), normalized using training statistics.
 
         Raises:
             RuntimeError: if buffer is not full yet.
@@ -92,14 +92,14 @@ class InputAssembler:
                 f"Buffer not ready: {self.buffer_fill}/{self.T_in} frames"
             )
 
-        skeleton = np.stack(list(self._skeleton_buffer))  # [T_in, 48]
+        skeleton = np.stack(list(self._skeleton_buffer))  # [T_in, skeleton_dim]
 
         if self.skeleton_only:
             skel_normed = (
                 (skeleton - self.norm_stats.skeleton_mean)
                 / self.norm_stats.skeleton_std
             )
-            return torch.from_numpy(skel_normed).float().unsqueeze(0)  # [1, T_in, 48]
+            return torch.from_numpy(skel_normed).float().unsqueeze(0)  # [1, T_in, skeleton_dim]
 
         joints = np.stack(list(self._joints_buffer))  # [T_in, 6]
         skel_normed, joints_normed = apply_normalization(

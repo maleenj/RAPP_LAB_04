@@ -1,14 +1,15 @@
 """VAM Inference Node — real-time skeleton-to-joint prediction for TM12S.
 
 Subscribes to ZED skeleton tracking and TM12S joint states, runs the trained
-Action Chunking Transformer (trained on UR10 data) through the temporal
-ensemble pipeline, applies sign convention mapping, and publishes smooth
-joint commands.
+Action Chunking Transformer through the temporal ensemble pipeline, applies
+optional sign convention mapping, and publishes smooth joint commands.
 
-The model outputs UR10 joint angles which are mapped to TM12S joint space
-via per-joint sign multipliers and angular offsets derived from comparing
-UR10 and TM12S URDF joint frame conventions:
-    tm12s_angle = sign * ur10_angle + offset
+Model output is mapped to TM12S joint space via per-joint sign multipliers
+and angular offsets (configurable via parameters or TM12S_CONFIG):
+    tm12s_angle = sign * model_angle + offset
+
+When trained on native TM12S data, use identity mapping (signs=1, offsets=0).
+When trained on UR10 data, use the UR10→TM12S mapping from robot_configs.py.
 
 After mapping, angles are normalized to [-π, π] via arctan2(sin, cos) so
 they match the range reported by /joint_states (TM12S encoder values).
@@ -70,14 +71,14 @@ class VAMTM12SInferenceNode(Node):
         # --- Declare parameters ---
         self.declare_parameter("mode", "rviz")
         self.declare_parameter(
-            "checkpoint_path", "/data/models/vam_20260210_2342/best.pt"
+            "checkpoint_path", "/data/models/vam_skelonly_tm12_20260404_0631/best.pt"
         )
         self.declare_parameter(
-            "model_config_path", "/data/models/vam_20260210_2342/model_config.json"
+            "model_config_path", "/data/models/vam_skelonly_tm12_20260404_0631/model_config.json"
         )
         self.declare_parameter(
             "norm_stats_path",
-            "/data/processed/tensors/2026_02_10_tin10_tout10/norm_stats.pt",
+            "/data/processed/tensors/2026_04_04_tm12/norm_stats.pt",
         )
         self.declare_parameter("device", "cuda")
         self.declare_parameter("prediction_stride_K", 1)
@@ -206,7 +207,7 @@ class VAMTM12SInferenceNode(Node):
         self._still_count = 0
 
         # --- State ---
-        self._latest_skeleton: np.ndarray | None = None  # [48]
+        self._latest_skeleton: np.ndarray | None = None  # [54]
         self._latest_joints: np.ndarray | None = None  # [6]
         self._skeleton_stamp: Time | None = None
         self._joints_stamp: Time | None = None
@@ -286,24 +287,24 @@ class VAMTM12SInferenceNode(Node):
             )
             return
 
-        # Extract 16 keypoints → [48] array
-        keypoints = obj.skeleton_3d.keypoints[:16]
-        skeleton_48 = np.array(
+        # Extract 18 keypoints (ZED BODY_18 format) → [54] array
+        keypoints = obj.skeleton_3d.keypoints[:18]
+        skeleton_54 = np.array(
             [[kp.kp[0], kp.kp[1], kp.kp[2]] for kp in keypoints],
             dtype=np.float32,
         ).flatten()
 
-        if not np.all(np.isfinite(skeleton_48)):
-            nan_count = np.sum(~np.isfinite(skeleton_48))
+        if not np.all(np.isfinite(skeleton_54)):
+            nan_count = np.sum(~np.isfinite(skeleton_54))
             self.get_logger().warn(
-                f"Skeleton has {nan_count}/48 non-finite values, dropping frame",
+                f"Skeleton has {nan_count}/54 non-finite values, dropping frame",
                 throttle_duration_sec=2.0,
             )
             return
 
         # Transform to TM12S planning frame via tf2
         skeleton_transformed = self._transform_skeleton(
-            skeleton_48, msg.header.frame_id, msg.header.stamp
+            skeleton_54, msg.header.frame_id, msg.header.stamp
         )
         if skeleton_transformed is None:
             return
@@ -493,7 +494,7 @@ class VAMTM12SInferenceNode(Node):
         return objects[0]
 
     def _transform_skeleton(
-        self, skeleton_48: np.ndarray, source_frame: str, stamp
+        self, skeleton_54: np.ndarray, source_frame: str, stamp
     ) -> np.ndarray | None:
         """Transform skeleton keypoints from source_frame to model training frame."""
         try:
@@ -517,7 +518,7 @@ class VAMTM12SInferenceNode(Node):
         translation = np.array([t.x, t.y, t.z], dtype=np.float64)
         rotation = self._quat_to_rotation_matrix(q.x, q.y, q.z, q.w)
 
-        points = skeleton_48.reshape(16, 3).astype(np.float64)
+        points = skeleton_54.reshape(18, 3).astype(np.float64)
         transformed = (rotation @ points.T).T + translation
         return transformed.flatten().astype(np.float32)
 

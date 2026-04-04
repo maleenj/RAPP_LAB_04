@@ -68,7 +68,7 @@ def generate_launch_description():
     if latest_skelonly:
         default_model_dir = latest_skelonly
     else:
-        default_model_dir = "/data/models/vam_20260210_2342"
+        default_model_dir = "/data/models/vam_skelonly_tm12_20260404_0631"
 
     return LaunchDescription(
         [
@@ -83,7 +83,7 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument(
                 "norm_stats_path",
-                default_value="/data/processed/tensors/2026_02_10_tin10_tout10/norm_stats.pt",
+                default_value="/data/processed/tensors/2026_04_04_tm12/norm_stats.pt",
             ),
             DeclareLaunchArgument("device", default_value="cuda"),
             DeclareLaunchArgument(
