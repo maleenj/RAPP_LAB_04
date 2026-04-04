@@ -42,6 +42,7 @@ class VAMTrainer:
         device: torch.device,
         experiment_name: str = "vam",
         norm_stats: Optional[NormalizationStats] = None,
+        joint_limits=None,
     ):
         self.model = model.to(device)
         self.dataloaders = dataloaders
@@ -52,7 +53,7 @@ class VAMTrainer:
 
         # Precompute normalized joint limits for the loss penalty
         if norm_stats is not None and train_config.joint_limit_weight > 0:
-            self.joint_limits_normed = normalize_joint_limits(norm_stats).to(device)
+            self.joint_limits_normed = normalize_joint_limits(norm_stats, joint_limits=joint_limits).to(device)
         else:
             self.joint_limits_normed = None
 

@@ -46,8 +46,9 @@ class EpisodeMetadata:
 class EpisodeLoader:
     """Loads and validates CSV episodes."""
 
-    def __init__(self, config: DataPipelineConfig):
+    def __init__(self, config: DataPipelineConfig, joint_limits=None):
         self.config = config
+        self.joint_limits = joint_limits if joint_limits is not None else UR10_JOINT_LIMITS
 
     def discover_episodes(self) -> List[EpisodeMetadata]:
         """Read recordings_metadata.csv and build list of EpisodeMetadata."""
@@ -134,7 +135,7 @@ class EpisodeLoader:
             warnings.append(f"{n_gaps} time gap(s) > 0.5s (max: {max_gap:.3f}s)")
 
         # Joint limits
-        for j_idx, (lo, hi) in enumerate(UR10_JOINT_LIMITS):
+        for j_idx, (lo, hi) in enumerate(self.joint_limits):
             col = joints[:, j_idx]
             violations = ((col < lo) | (col > hi)).sum()
             if violations > 0:

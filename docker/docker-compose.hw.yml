@@ -37,7 +37,8 @@ services:
 
       # Code directories (development mode)
       - ../vam_utils:/workspace/vam_utils:rw
-      - ../notebooks:/workspace/notebooks:rw
+      - ../notebooks_ur:/workspace/notebooks_ur:rw
+      - ../notebooks_tm:/workspace/notebooks_tm:rw
       - ../ros2_ws:/workspace/ros2_ws:rw
       - ../scripts:/workspace/scripts:rw
 
@@ -45,7 +46,7 @@ services:
       - ../config:/config:ro
 
       # Data volumes
-      - /home/maleen/rosbags/rapplab04:/data/rosbags:ro
+      - /home/maleen/rosbags/rapplab04:/data/rosbags:rw
       - /home/maleen/csvdata/rapplab04:/data/processed:rw
       - /home/maleen/models/rapplab04:/data/models:rw
       - /home/maleen/models/rapplab04/logs:/data/logs:rw

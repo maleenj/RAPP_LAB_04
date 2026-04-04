@@ -105,13 +105,20 @@ def apply_normalization(
     return skeleton_normed, joints_normed
 
 
-def normalize_joint_limits(stats: NormalizationStats) -> torch.Tensor:
-    """Convert UR10 physical joint limits to normalized space.
+def normalize_joint_limits(stats: NormalizationStats, joint_limits=None) -> torch.Tensor:
+    """Convert physical joint limits to normalized space.
+
+    Args:
+        stats: normalization statistics
+        joint_limits: list of (lower, upper) tuples per joint. Defaults to UR10 limits.
 
     Returns:
         Tensor of shape [6, 2] where [:, 0] = lower, [:, 1] = upper (normalized).
     """
-    limits = get_joint_limits_tensor()  # [6, 2]
+    if joint_limits is not None:
+        limits = torch.tensor(joint_limits, dtype=torch.float32)
+    else:
+        limits = get_joint_limits_tensor()  # [6, 2]
     mean = torch.from_numpy(stats.joint_mean).float()  # [6]
     std = torch.from_numpy(stats.joint_std).float()     # [6]
     limits_normed = (limits - mean.unsqueeze(1)) / std.unsqueeze(1)
@@ -122,16 +129,18 @@ def inverse_normalize_joints(
     joints_normed: np.ndarray,
     stats: NormalizationStats,
     clamp_to_limits: bool = False,
+    joint_limits=None,
 ) -> np.ndarray:
     """Reverse normalization on predicted joint angles (for inference).
 
     Args:
         joints_normed: normalized joint angles, any shape with last dim = 6
         stats: normalization statistics
-        clamp_to_limits: if True, clamp output to UR10 physical joint limits
+        clamp_to_limits: if True, clamp output to physical joint limits
+        joint_limits: list of (lower, upper) tuples per joint. Defaults to UR10 limits.
     """
     joints = joints_normed * stats.joint_std + stats.joint_mean
     if clamp_to_limits:
-        limits = np.array(UR10_JOINT_LIMITS, dtype=np.float32)  # [6, 2]
+        limits = np.array(joint_limits if joint_limits is not None else UR10_JOINT_LIMITS, dtype=np.float32)
         joints = np.clip(joints, limits[:, 0], limits[:, 1])
     return joints
