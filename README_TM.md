@@ -137,9 +137,9 @@ ros2 run vam_inference vam_pvt_streamer
 docker exec -it rapp_hw bash
 source /opt/ros/humble/setup.bash
 ros2 run tf2_ros static_transform_publisher \
-    4.4 0.1 -0.25 1.5708 0 0 map world
+    3.6 -0.27 -0.25 3.1416 0 0 map world
 
-ros2 run tf2_ros static_transform_publisher   4.4 0.1 -0.25 1.5708 0 0 map base
+ros2 run tf2_ros static_transform_publisher   3.6 -0.27 -0.25 3.1416 0 0 map base
 
 
 # Terminal 4 (rapp_vam): Play rosbag — skeleton topic ONLY (no --clock!)

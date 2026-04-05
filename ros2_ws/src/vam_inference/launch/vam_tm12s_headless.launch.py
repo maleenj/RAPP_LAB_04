@@ -128,34 +128,26 @@ def generate_launch_description():
             ),
 
             # --- Static transforms ---
-            # map → world: camera-to-robot calibration transform
-            # (matches: ros2 run tf2_ros static_transform_publisher
-            #  4.4 0.1 -0.25 1.5708 0 0 map world)
+            # The rosbag already publishes (from /tf_static):
+            #   map → base          (calibration: x=3.6, y=-0.27, z=-0.25, yaw=π)
+            #   base → link_0       (identity)
+            #   flange → link_6     (identity)
+            #   zed_camera_link → zed_camera_center → zed_left_camera_frame
+            #
+            # We only need to connect the camera tree to map:
+            #   map → zed_camera_link (identity, camera is at map origin)
+            #
+            # TF chain for skeleton transform:
+            #   base ← map → zed_camera_link → ... → zed_left_camera_frame
             Node(
                 package="tf2_ros",
                 executable="static_transform_publisher",
-                name="map_to_world",
-                arguments=[
-                    "--x", "4.4", "--y", "0.1", "--z", "-0.25",
-                    "--roll", "1.5708", "--pitch", "0", "--yaw", "0",
-                    "--frame-id", "map",
-                    "--child-frame-id", "world",
-                ],
-                parameters=[
-                    {"use_sim_time": LaunchConfiguration("use_sim_time")}
-                ],
-            ),
-            # map → zed_left_camera_frame: skeleton data arrives in this frame
-            # from the rosbag. Identity transform assumes camera is at map origin.
-            Node(
-                package="tf2_ros",
-                executable="static_transform_publisher",
-                name="map_to_camera_frame",
+                name="map_to_camera",
                 arguments=[
                     "--x", "0", "--y", "0", "--z", "0",
                     "--roll", "0", "--pitch", "0", "--yaw", "0",
                     "--frame-id", "map",
-                    "--child-frame-id", "zed_left_camera_frame",
+                    "--child-frame-id", "zed_camera_link",
                 ],
                 parameters=[
                     {"use_sim_time": LaunchConfiguration("use_sim_time")}

@@ -47,7 +47,7 @@ if str(_workspace) not in sys.path:
     sys.path.insert(0, str(_workspace))
 
 from vam_utils.config import InferenceConfig
-from vam_utils.data.robot_configs import TM12S_JOINT_NAMES, TM12S_CONFIG
+from vam_utils.data.robot_configs import TM12S_JOINT_NAMES, TM12S_JOINT_LIMITS, TM12S_CONFIG
 from vam_utils.inference import (
     InputAssembler,
     VAMModelWrapper,
@@ -118,6 +118,13 @@ class VAMTM12SInferenceNode(Node):
         self._joint_offsets = np.array(
             self.get_parameter("joint_offsets").value, dtype=np.float32
         )
+        # When using identity mapping (native TM12S training data), arctan2
+        # wrapping must be skipped — the training data has joints outside
+        # [-pi, pi] (e.g. j4/wrist_2 ranges up to 6.28 rad).
+        self._identity_mapping = (
+            np.allclose(self._sign_multipliers, 1.0)
+            and np.allclose(self._joint_offsets, 0.0)
+        )
 
         # --- Build inference config from parameters ---
         config = InferenceConfig(
@@ -138,7 +145,7 @@ class VAMTM12SInferenceNode(Node):
 
         # --- Load model and create pipeline components ---
         self.get_logger().info("Loading VAM model for TM12S...")
-        self._model = VAMModelWrapper(config)
+        self._model = VAMModelWrapper(config, joint_limits=TM12S_JOINT_LIMITS)
         self._skeleton_only = self._model.skeleton_only
         self._assembler = InputAssembler(
             norm_stats=self._model.norm_stats,
@@ -392,10 +399,12 @@ class VAMTM12SInferenceNode(Node):
             # Map UR10 joint angles → TM12S: sign flip + angular offset
             target = self._sign_multipliers * target + self._joint_offsets
 
-            # Normalize to [-π, π] so mapped values match /joint_states
-            # encoder range. Without this, offsets like 3π/2 produce values
-            # ~5 rad away from the encoder reading for the same physical pose.
-            target = np.arctan2(np.sin(target), np.cos(target))
+            # Normalize to [-π, π] only when sign/offset mapping is active.
+            # With identity mapping (native TM12S data), wrapping is
+            # destructive: j4/wrist_2 trains at 0–6.28 rad and wrapping
+            # snaps predictions above π to negative values (-360°).
+            if not self._identity_mapping:
+                target = np.arctan2(np.sin(target), np.cos(target))
 
             raw_target = target.copy()  # before any filtering
 

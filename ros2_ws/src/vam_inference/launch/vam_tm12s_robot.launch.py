@@ -84,7 +84,7 @@ def generate_launch_description():
     if latest_skelonly:
         default_model_dir = latest_skelonly
     else:
-        default_model_dir = "/data/models/vam_skelonly_tm12_20260404_0631"
+        default_model_dir = "/data/models/vam_skelonly_tm12_mirror_pom20260405_0314"
 
     return LaunchDescription(
         [
@@ -99,7 +99,7 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument(
                 "norm_stats_path",
-                default_value="/data/processed/tensors/2026_04_04_tm12/norm_stats.pt",
+                default_value="/data/processed/tensors/2026_04_05_tm12_mirror_pom/norm_stats.pt",
             ),
             DeclareLaunchArgument("device", default_value="cuda"),
             DeclareLaunchArgument("prediction_stride_K", default_value="1"),
@@ -203,18 +203,36 @@ def generate_launch_description():
             ),
 
             # --- Static transform: map → world (camera-to-robot calibration) ---
-            # Must match the headless launch. Uses --roll (X-axis rotation),
-            # NOT yaw. The old manual prerequisite used positional args
-            # (x y z yaw pitch roll) which applied 1.5708 as yaw incorrectly.
+            # Values from TM12S rosbag /tf_static (26_04_03 recordings).
+            # world→base is identity in the TM12S MoveIt config, so
+            # map→world effectively equals map→base.
             Node(
                 package="tf2_ros",
                 executable="static_transform_publisher",
                 name="map_to_world",
                 arguments=[
-                    "--x", "4.4", "--y", "0.1", "--z", "-0.25",
-                    "--roll", "1.5708", "--pitch", "0", "--yaw", "0",
+                    "--x", "3.6", "--y", "-0.27", "--z", "-0.25",
+                    "--roll", "0", "--pitch", "0", "--yaw", "3.1416",
                     "--frame-id", "map",
                     "--child-frame-id", "world",
+                ],
+                parameters=[
+                    {"use_sim_time": LaunchConfiguration("use_sim_time")}
+                ],
+            ),
+
+            # --- Static transform: world → base (identity) ---
+            # URDF root is 'base', not 'world'. This bridges the
+            # map→world tree to the robot_state_publisher tree.
+            Node(
+                package="tf2_ros",
+                executable="static_transform_publisher",
+                name="world_to_base",
+                arguments=[
+                    "--x", "0", "--y", "0", "--z", "0",
+                    "--roll", "0", "--pitch", "0", "--yaw", "0",
+                    "--frame-id", "world",
+                    "--child-frame-id", TM12S_PLANNING_FRAME,
                 ],
                 parameters=[
                     {"use_sim_time": LaunchConfiguration("use_sim_time")}

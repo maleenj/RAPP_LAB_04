@@ -30,7 +30,7 @@ class VAMModelWrapper:
         joints_rad = wrapper.predict(input_tensor)  # [T_out, 6] radians
     """
 
-    def __init__(self, config: InferenceConfig):
+    def __init__(self, config: InferenceConfig, joint_limits=None):
         self.device = torch.device(config.device)
 
         # Load model config and trained weights
@@ -59,6 +59,7 @@ class VAMModelWrapper:
         # Load normalization stats for denormalization
         self.norm_stats = NormalizationStats.load(config.norm_stats_path)
         self.clamp_to_limits = config.clamp_to_joint_limits
+        self.joint_limits = joint_limits
 
         epoch = checkpoint.get("epoch", "?")
         val_loss = checkpoint.get("best_val_loss", "?")
@@ -97,7 +98,9 @@ class VAMModelWrapper:
         pred_normed = self.model(input_tensor.to(self.device))  # [1, T_out, 6]
         pred_np = pred_normed.cpu().numpy()[0]  # [T_out, 6]
         return inverse_normalize_joints(
-            pred_np, self.norm_stats, clamp_to_limits=self.clamp_to_limits
+            pred_np, self.norm_stats,
+            clamp_to_limits=self.clamp_to_limits,
+            joint_limits=self.joint_limits,
         )
 
     @torch.inference_mode()
