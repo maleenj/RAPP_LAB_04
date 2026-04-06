@@ -25,8 +25,19 @@ else
     echo "vam_utils directory not found. Will be available after mounting."
 fi
 
-# Source ROS2 workspace if it exists
-if [ -d "/workspace/ros2_ws/install" ]; then
+# Pin setuptools for ROS2 Humble colcon build compatibility
+echo "Pinning setuptools for colcon build..."
+pip3 install -q setuptools==58.2.0
+
+# Build and source ROS2 workspace
+if [ -d "/workspace/ros2_ws/src" ]; then
+    echo "Building ROS2 workspace (vam_interfaces + vam_inference)..."
+    cd /workspace/ros2_ws
+    colcon build --symlink-install --packages-select vam_interfaces vam_inference 2>&1 | tail -5
+    source /workspace/ros2_ws/install/setup.bash
+    echo "ROS2 workspace built and sourced."
+    cd /workspace
+elif [ -d "/workspace/ros2_ws/install" ]; then
     echo "Sourcing ROS2 workspace..."
     source /workspace/ros2_ws/install/setup.bash
 fi

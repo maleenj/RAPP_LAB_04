@@ -1,0 +1,32 @@
+# VAM Model Registry
+# Select at launch:   ros2 launch vam_inference vam_tm12s_robot.launch.py active_model:=2
+# Switch at runtime:  ros2 service call /vam/switch_model vam_interfaces/srv/SwitchModel "{model_id: 2}"
+#
+# Each model needs:
+#   model_dir      — directory containing best.pt and model_config.json
+#   norm_stats_path — path to norm_stats.pt from the training data pipeline
+
+models:
+  1:
+    name: "mirror_pom"
+    description: "Mirror actor - POM trained 2026-04-05"
+    model_dir: "/data/models/vam_skelonly_tm12_mirror_pom20260405_0314"
+    norm_stats_path: "/data/processed/tensors/2026_04_05_tm12_mirror_pom/norm_stats.pt"
+
+  2:
+    name: "mirror_basic"
+    description: "Mirror actor - basic training"
+    model_dir: "/data/models/vam_skelonly_tm12_20260404_0631"
+    norm_stats_path: "/data/processed/tensors/2026_04_04_tm12/norm_stats.pt"
+
+  # 3:
+  #   name: "contrast"
+  #   description: "Contrast actor movement"
+  #   model_dir: "/data/models/..."
+  #   norm_stats_path: "/data/processed/tensors/.../norm_stats.pt"
+
+  # 4:
+  #   name: "custom"
+  #   description: "Custom behaviour"
+  #   model_dir: "/data/models/..."
+  #   norm_stats_path: "/data/processed/tensors/.../norm_stats.pt"

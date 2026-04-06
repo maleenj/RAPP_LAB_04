@@ -15,6 +15,10 @@ Prerequisites (run in separate terminals in rapp_hw container):
 
 Usage:
     ros2 launch vam_inference vam_tm12s_robot.launch.py
+    ros2 launch vam_inference vam_tm12s_robot.launch.py active_model:=2
+
+Switch model at runtime:
+    ros2 service call /vam/switch_model vam_interfaces/srv/SwitchModel "{model_id: 2}"
 """
 
 import re
@@ -29,17 +33,6 @@ from launch_ros.actions import Node
 
 VAM_PREFIX = "vam/"
 TM12S_PLANNING_FRAME = "base"
-
-
-def _find_latest_model(prefix: str = "vam_skelonly_") -> str | None:
-    """Find the most recent model directory matching a prefix."""
-    models_dir = Path("/data/models")
-    if not models_dir.exists():
-        return None
-    matches = sorted(models_dir.glob(f"{prefix}*"))
-    if matches and (matches[-1] / "best.pt").exists():
-        return str(matches[-1])
-    return None
 
 
 def _prefix_urdf_tm12s(urdf_path: str, prefix: str) -> str:
@@ -79,27 +72,24 @@ def generate_launch_description():
     tm12s_urdf_path = "/data/processed/tm12s.urdf"
     vam_urdf = _prefix_urdf_tm12s(tm12s_urdf_path, VAM_PREFIX)
 
-    # Auto-detect latest skeleton-only model
-    latest_skelonly = _find_latest_model("vam_skelonly_")
-    if latest_skelonly:
-        default_model_dir = latest_skelonly
-    else:
-        default_model_dir = "/data/models/vam_skelonly_tm12_mirror_pom20260405_0314"
+    # Model registry YAML — defines all available models.
+    # Select which model to load via active_model argument.
+    default_models_config = str(
+        Path(pkg_share) / "config" / "vam_models.yaml"
+    )
 
     return LaunchDescription(
         [
             # --- Arguments with CONSERVATIVE defaults ---
             DeclareLaunchArgument(
-                "checkpoint_path",
-                default_value=f"{default_model_dir}/best.pt",
+                "models_config",
+                default_value=default_models_config,
+                description="Path to vam_models.yaml model registry.",
             ),
             DeclareLaunchArgument(
-                "model_config_path",
-                default_value=f"{default_model_dir}/model_config.json",
-            ),
-            DeclareLaunchArgument(
-                "norm_stats_path",
-                default_value="/data/processed/tensors/2026_04_05_tm12_mirror_pom/norm_stats.pt",
+                "active_model",
+                default_value="1",
+                description="Model ID to load from registry (1, 2, 3, ...).",
             ),
             DeclareLaunchArgument("device", default_value="cuda"),
             DeclareLaunchArgument("prediction_stride_K", default_value="1"),
@@ -281,11 +271,8 @@ def generate_launch_description():
                 parameters=[
                     {
                         "mode": "robot",
-                        "checkpoint_path": LaunchConfiguration("checkpoint_path"),
-                        "model_config_path": LaunchConfiguration(
-                            "model_config_path"
-                        ),
-                        "norm_stats_path": LaunchConfiguration("norm_stats_path"),
+                        "models_config": LaunchConfiguration("models_config"),
+                        "active_model": LaunchConfiguration("active_model"),
                         "device": LaunchConfiguration("device"),
                         "prediction_stride_K": LaunchConfiguration(
                             "prediction_stride_K"

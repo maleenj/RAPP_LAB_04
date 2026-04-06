@@ -28,6 +28,7 @@ setup(
             'servo_to_tm_pvt_bridge = vam_inference.servo_to_tm_pvt_bridge:main',
             'servo_to_tm_ptp_bridge = vam_inference.servo_to_tm_ptp_bridge:main',
             'vam_pvt_streamer = vam_inference.vam_pvt_streamer:main',
+            'vam_pvt_streamer_new = vam_inference.vam_pvt_streamer_new:main',
         ],
     },
 )

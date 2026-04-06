@@ -10,6 +10,8 @@
 #   docker compose up -d
 ###############################################
 
+name: rapp-hw
+
 services:
   hw:
     image: zed_ros2_desktop_u22.04_sdk_5.1.0_cuda_12.1.1:latest
@@ -30,7 +32,13 @@ services:
       - LANG=en_US.UTF-8
       - LC_ALL=en_US.UTF-8
 
+    entrypoint: /entrypoint_hw.sh
+    command: ["bash"]
+
     volumes:
+      # Custom entrypoint
+      - ./hw/entrypoint.sh:/entrypoint_hw.sh:ro
+
       # Servo & controller configs (mounted into tm2_ws install tree)
       - ../ros2_ws/src/vam_inference/config/tm12s_servo_vam.yaml:/tm2_ws/install/tm12s_moveit_config/share/tm12s_moveit_config/config/tm12s_servo_vam.yaml:ro
       - ../ros2_ws/src/vam_inference/config/tm12s_ros2_controllers.yaml:/tm2_ws/install/tm12s_moveit_config/share/tm12s_moveit_config/config/ros2_controllers.yaml:ro

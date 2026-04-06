@@ -26,6 +26,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import yaml
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import (
@@ -40,6 +41,7 @@ from std_msgs.msg import Float64MultiArray
 from zed_msgs.msg import ObjectsStamped
 
 import tf2_ros
+from vam_interfaces.srv import SwitchModel
 
 # Ensure vam_utils is importable (mounted at /workspace in container)
 _workspace = Path("/workspace")
@@ -70,16 +72,8 @@ class VAMTM12SInferenceNode(Node):
 
         # --- Declare parameters ---
         self.declare_parameter("mode", "rviz")
-        self.declare_parameter(
-            "checkpoint_path", "/data/models/vam_skelonly_tm12_20260404_0631/best.pt"
-        )
-        self.declare_parameter(
-            "model_config_path", "/data/models/vam_skelonly_tm12_20260404_0631/model_config.json"
-        )
-        self.declare_parameter(
-            "norm_stats_path",
-            "/data/processed/tensors/2026_04_04_tm12/norm_stats.pt",
-        )
+        self.declare_parameter("models_config", "")
+        self.declare_parameter("active_model", 1)
         self.declare_parameter("device", "cuda")
         self.declare_parameter("prediction_stride_K", 1)
         self.declare_parameter("ensemble_decay_weight", 0.5)
@@ -126,37 +120,42 @@ class VAMTM12SInferenceNode(Node):
             and np.allclose(self._joint_offsets, 0.0)
         )
 
+        # --- Load model registry from YAML ---
+        self._models_registry = {}
+        models_config_path = self.get_parameter("models_config").value
+        if models_config_path:
+            cfg_path = Path(models_config_path)
+            if cfg_path.exists():
+                with open(cfg_path) as f:
+                    registry = yaml.safe_load(f)
+                self._models_registry = {
+                    int(k): v for k, v in registry.get("models", {}).items()
+                }
+                self.get_logger().info(
+                    f"Loaded model registry: {len(self._models_registry)} models "
+                    f"from {cfg_path}"
+                )
+            else:
+                self.get_logger().warn(
+                    f"Models config not found: {cfg_path}"
+                )
+
+        self._active_model_id = int(self.get_parameter("active_model").value)
+        self._switching = False
+
+        # Resolve model paths from registry (or fall back to defaults)
+        checkpoint_path, model_config_path, norm_stats_path = (
+            self._resolve_model_paths(self._active_model_id)
+        )
+
         # --- Build inference config from parameters ---
-        config = InferenceConfig(
-            checkpoint_path=Path(self.get_parameter("checkpoint_path").value),
-            model_config_path=Path(self.get_parameter("model_config_path").value),
-            norm_stats_path=Path(self.get_parameter("norm_stats_path").value),
-            device=self.get_parameter("device").value,
-            prediction_stride_K=self.get_parameter("prediction_stride_K").value,
-            ensemble_decay_weight=self.get_parameter("ensemble_decay_weight").value,
-            max_joint_velocity_rad_s=self.get_parameter(
-                "max_joint_velocity_rad_s"
-            ).value,
-            max_joint_acceleration_rad_s2=self.get_parameter(
-                "max_joint_acceleration_rad_s2"
-            ).value,
-            control_rate_hz=self.get_parameter("control_rate_hz").value,
+        config = self._build_inference_config(
+            checkpoint_path, model_config_path, norm_stats_path
         )
 
         # --- Load model and create pipeline components ---
-        self.get_logger().info("Loading VAM model for TM12S...")
-        self._model = VAMModelWrapper(config, joint_limits=TM12S_JOINT_LIMITS)
-        self._skeleton_only = self._model.skeleton_only
-        self._assembler = InputAssembler(
-            norm_stats=self._model.norm_stats,
-            T_in=10,
-            skeleton_only=self._skeleton_only,
-        )
-        self._ensemble = TemporalEnsemble(
-            T_out=10,
-            K=config.prediction_stride_K,
-            decay_weight=config.ensemble_decay_weight,
-        )
+        self._load_pipeline(config)
+
         # In feedback mode: joint_limits_only=True because the feedback
         # smoother already rate-limits targets (max_vel parameter). Adding
         # safety checker velocity/accel limiting on top causes stop-start
@@ -169,13 +168,6 @@ class VAMTM12SInferenceNode(Node):
             max_joint_acceleration_rad_s2=config.max_joint_acceleration_rad_s2,
             dt=config.frame_dt,
             joint_limits_only=use_joint_limits_only,
-        )
-        model_type_str = "skeleton_only" if self._skeleton_only else "skeleton+joints"
-        self.get_logger().info(
-            f"Model loaded ({model_type_str}). Mode={self._mode}, "
-            f"K={config.prediction_stride_K}, lambda={config.ensemble_decay_weight}, "
-            f"sign_multipliers={self._sign_multipliers.tolist()}, "
-            f"joint_offsets={[round(o, 3) for o in self._joint_offsets.tolist()]}"
         )
 
         # --- Smoothing filter ---
@@ -261,9 +253,188 @@ class VAMTM12SInferenceNode(Node):
                 "for vam_pvt_streamer."
             )
 
+        # --- Model switch service ---
+        self._switch_srv = self.create_service(
+            SwitchModel, "/vam/switch_model", self._switch_model_cb
+        )
+
         # --- 15 Hz timer ---
         self._timer = self.create_timer(1.0 / self._control_rate, self._timer_cb)
         self.get_logger().info(f"VAM TM12S inference node started at {self._control_rate:.0f} Hz")
+
+    # ------------------------------------------------------------------
+    # Model registry helpers
+    # ------------------------------------------------------------------
+
+    def _resolve_model_paths(self, model_id: int) -> tuple[str, str, str]:
+        """Resolve checkpoint, model_config, and norm_stats paths from registry."""
+        if model_id in self._models_registry:
+            entry = self._models_registry[model_id]
+            model_dir = entry["model_dir"]
+            checkpoint_path = f"{model_dir}/best.pt"
+            model_config_path = f"{model_dir}/model_config.json"
+            norm_stats_path = entry["norm_stats_path"]
+            name = entry.get("name", "unnamed")
+            desc = entry.get("description", "")
+            self.get_logger().info(
+                f'=== Active model: #{model_id} "{name}" - {desc} ==='
+            )
+            self.get_logger().info(f"  Model dir: {model_dir}")
+            self.get_logger().info(f"  Norm stats: {norm_stats_path}")
+            return checkpoint_path, model_config_path, norm_stats_path
+
+        # Fallback: no registry or model_id not found
+        self.get_logger().warn(
+            f"Model #{model_id} not found in registry "
+            f"(available: {list(self._models_registry.keys())}). "
+            f"Using first available model."
+        )
+        if self._models_registry:
+            first_id = min(self._models_registry.keys())
+            return self._resolve_model_paths(first_id)
+
+        # No registry at all — use hardcoded defaults
+        self.get_logger().warn("No model registry loaded, using hardcoded defaults.")
+        return (
+            "/data/models/vam_skelonly_tm12_20260404_0631/best.pt",
+            "/data/models/vam_skelonly_tm12_20260404_0631/model_config.json",
+            "/data/processed/tensors/2026_04_04_tm12/norm_stats.pt",
+        )
+
+    def _build_inference_config(
+        self, checkpoint_path: str, model_config_path: str, norm_stats_path: str
+    ) -> InferenceConfig:
+        """Build InferenceConfig from resolved paths and current parameters."""
+        return InferenceConfig(
+            checkpoint_path=Path(checkpoint_path),
+            model_config_path=Path(model_config_path),
+            norm_stats_path=Path(norm_stats_path),
+            device=self.get_parameter("device").value,
+            prediction_stride_K=self.get_parameter("prediction_stride_K").value,
+            ensemble_decay_weight=self.get_parameter(
+                "ensemble_decay_weight"
+            ).value,
+            max_joint_velocity_rad_s=self.get_parameter(
+                "max_joint_velocity_rad_s"
+            ).value,
+            max_joint_acceleration_rad_s2=self.get_parameter(
+                "max_joint_acceleration_rad_s2"
+            ).value,
+            control_rate_hz=self.get_parameter("control_rate_hz").value,
+        )
+
+    def _load_pipeline(self, config: InferenceConfig) -> None:
+        """Load model and create pipeline components (assembler, ensemble)."""
+        self.get_logger().info("Loading VAM model for TM12S...")
+        self._model = VAMModelWrapper(config, joint_limits=TM12S_JOINT_LIMITS)
+        self._skeleton_only = self._model.skeleton_only
+        self._assembler = InputAssembler(
+            norm_stats=self._model.norm_stats,
+            T_in=10,
+            skeleton_only=self._skeleton_only,
+        )
+        self._ensemble = TemporalEnsemble(
+            T_out=10,
+            K=config.prediction_stride_K,
+            decay_weight=config.ensemble_decay_weight,
+        )
+        model_type_str = "skeleton_only" if self._skeleton_only else "skeleton+joints"
+        self.get_logger().info(
+            f"Model loaded ({model_type_str}). Mode={self._mode}, "
+            f"K={config.prediction_stride_K}, "
+            f"lambda={config.ensemble_decay_weight}"
+        )
+
+    # ------------------------------------------------------------------
+    # Model switch service
+    # ------------------------------------------------------------------
+
+    def _switch_model_cb(self, request, response):
+        """Handle /vam/switch_model service call — safe hot-swap."""
+        model_id = request.model_id
+
+        if model_id not in self._models_registry:
+            available = list(self._models_registry.keys())
+            response.success = False
+            response.message = (
+                f"Model #{model_id} not found. Available: {available}"
+            )
+            response.active_model_name = self._models_registry.get(
+                self._active_model_id, {}
+            ).get("name", "unknown")
+            self.get_logger().warn(response.message)
+            return response
+
+        if model_id == self._active_model_id:
+            entry = self._models_registry[model_id]
+            response.success = True
+            response.message = (
+                f'Model #{model_id} "{entry["name"]}" is already active.'
+            )
+            response.active_model_name = entry["name"]
+            self.get_logger().info(response.message)
+            return response
+
+        old_entry = self._models_registry.get(self._active_model_id, {})
+        new_entry = self._models_registry[model_id]
+        self.get_logger().info(
+            f'Model switch requested: #{self._active_model_id} '
+            f'"{old_entry.get("name", "?")}" -> #{model_id} '
+            f'"{new_entry["name"]}"'
+        )
+        self.get_logger().info("Pausing inference for model swap...")
+
+        # Pause inference — timer callback will skip publishing
+        self._switching = True
+
+        try:
+            # Resolve paths and load new pipeline
+            checkpoint_path, model_config_path, norm_stats_path = (
+                self._resolve_model_paths(model_id)
+            )
+            config = self._build_inference_config(
+                checkpoint_path, model_config_path, norm_stats_path
+            )
+            self._load_pipeline(config)
+
+            # Reset smoothing filter state
+            self._ema_target = None
+            self._one_euro = OneEuroFilter(
+                n_signals=6,
+                rate=15.0,
+                min_cutoff=self.get_parameter("one_euro_min_cutoff").value,
+                beta=self.get_parameter("one_euro_beta").value,
+                d_cutoff=self.get_parameter("one_euro_d_cutoff").value,
+            )
+            self._stable_target = None
+            self._still_count = 0
+
+            # Re-seed safety checker with current robot position
+            self._safety_seeded = False
+            if self._latest_joints is not None:
+                self._safety.seed(self._latest_joints)
+                self._safety_seeded = True
+
+            self._active_model_id = model_id
+            self._frame_count = 0
+
+            response.success = True
+            response.message = (
+                f'Switched to model #{model_id} "{new_entry["name"]}".'
+            )
+            response.active_model_name = new_entry["name"]
+            self.get_logger().info(
+                f"Model swap complete, resuming inference."
+            )
+        except Exception as e:
+            response.success = False
+            response.message = f"Model swap failed: {e}"
+            response.active_model_name = old_entry.get("name", "unknown")
+            self.get_logger().error(f"Model swap failed: {e}")
+        finally:
+            self._switching = False
+
+        return response
 
     # ------------------------------------------------------------------
     # Subscriber callbacks
@@ -340,6 +511,9 @@ class VAMTM12SInferenceNode(Node):
 
     def _timer_cb(self) -> None:
         """15 Hz control loop: assemble → predict → sign map → safety → publish."""
+        if self._switching:
+            return
+
         now = self.get_clock().now()
 
         # Check data freshness

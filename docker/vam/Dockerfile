@@ -128,14 +128,15 @@ WORKDIR /workspace
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
-# Setup bashrc for convenient ROS2 usage
-RUN echo "source /opt/ros/${ROS2_DIST}/setup.bash" >> /root/.bashrc && \
-    echo "export ROS_DOMAIN_ID=0" >> /root/.bashrc && \
-    echo "export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp" >> /root/.bashrc && \
+# Setup bash environment for ROS2 (using /etc/bash.bashrc so it runs in all shells,
+# including docker exec sessions — /root/.bashrc has a non-interactive guard that skips it)
+RUN echo "source /opt/ros/${ROS2_DIST}/setup.bash" >> /etc/bash.bashrc && \
+    echo "export ROS_DOMAIN_ID=0" >> /etc/bash.bashrc && \
+    echo "export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp" >> /etc/bash.bashrc && \
+    echo "if [ -d /workspace/ros2_ws/install ]; then source /workspace/ros2_ws/install/setup.bash; fi" >> /etc/bash.bashrc && \
     echo "alias build='cd /workspace/ros2_ws && colcon build --symlink-install'" >> /root/.bashrc && \
     echo "alias source_ros='source /opt/ros/${ROS2_DIST}/setup.bash'" >> /root/.bashrc && \
-    echo "alias source_ws='source /workspace/ros2_ws/install/setup.bash'" >> /root/.bashrc && \
-    echo "if [ -d /workspace/ros2_ws/install ]; then source /workspace/ros2_ws/install/setup.bash; fi" >> /root/.bashrc
+    echo "alias source_ws='source /workspace/ros2_ws/install/setup.bash'" >> /root/.bashrc
 
 # Expose Jupyter Lab and TensorBoard ports
 EXPOSE 8888 6006

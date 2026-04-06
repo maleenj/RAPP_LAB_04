@@ -3,7 +3,9 @@
     "allow": [
       "Bash(ls /home/maleen/csvdata/rapplab04/*R2G4*)",
       "Bash(grep -cP ',,|,$' /home/maleen/csvdata/rapplab04/csv/26_04_03_RAPP_M_R2G4_02.csv)",
-      "Bash(grep -nP ',,|,$' /home/maleen/csvdata/rapplab04/csv/26_04_03_RAPP_M_R2G4_02.csv)"
+      "Bash(grep -nP ',,|,$' /home/maleen/csvdata/rapplab04/csv/26_04_03_RAPP_M_R2G4_02.csv)",
+      "Bash(chmod +x /home/maleen/git/RAPP_LAB_04/docker/hw/entrypoint.sh)",
+      "Bash(chmod +x /home/maleen/git/RAPP_LAB_04/docker/vam/entrypoint.sh)"
     ]
   }
 }
