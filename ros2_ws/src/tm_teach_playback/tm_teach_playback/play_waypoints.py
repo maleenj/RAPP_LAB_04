@@ -1,11 +1,12 @@
 import rclpy
 from rclpy.node import Node
 from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.executors import MultiThreadedExecutor
 from rclpy.action import ActionClient
 from moveit_msgs.action import MoveGroup
 from moveit_msgs.msg import Constraints, JointConstraint, MoveItErrorCodes
 import yaml
-import asyncio
+import time
 import threading
 
 
@@ -41,7 +42,7 @@ class PlayWaypoints(Node):
         self.get_logger().info(
             f'Loaded {len(self.waypoints)} waypoints. Loop={self.loop}')
 
-        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread = threading.Thread(target=self._execute, daemon=True)
         self._thread.start()
 
     def _load_waypoints(self, path):
@@ -56,14 +57,7 @@ class PlayWaypoints(Node):
             self.get_logger().error(f'Failed to load waypoints: {e}')
             return []
 
-    def _run(self):
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(self._execute())
-        loop.close()
-        self.get_logger().info('Playback finished.')
-
-    async def _execute(self):
+    def _execute(self):
         iteration = 0
         while True:
             iteration += 1
@@ -79,25 +73,26 @@ class PlayWaypoints(Node):
                     f'Waypoint {i+1}/{len(self.waypoints)} '
                     f'(move={move_time}s, wait={wait_time}s)')
 
-                success = await self._move_to(joints, move_time)
+                success = self._move_to(joints, move_time)
                 if not success:
                     self.get_logger().error(
                         f'Failed at waypoint {i+1}. Stopping.')
                     return
 
                 if wait_time > 0:
-                    await asyncio.sleep(wait_time)
+                    time.sleep(wait_time)
 
             if not self.loop:
                 break
 
-    async def _move_to(self, joint_positions, move_time):
+        self.get_logger().info('Playback finished.')
+
+    def _move_to(self, joint_positions, move_time):
         goal_msg = MoveGroup.Goal()
         goal_msg.request.group_name = 'tmr_arm'
         goal_msg.request.allowed_planning_time = 5.0
         goal_msg.request.num_planning_attempts = 10
 
-        # Scale velocity/acceleration: shorter move_time = faster
         vel_scale = min(1.0, 1.0 / move_time) if move_time > 0 else 1.0
         goal_msg.request.max_velocity_scaling_factor = vel_scale
         goal_msg.request.max_acceleration_scaling_factor = vel_scale
@@ -114,12 +109,19 @@ class PlayWaypoints(Node):
         goal_msg.request.goal_constraints = [constraints]
 
         try:
-            goal_handle = await self.move_client.send_goal_async(goal_msg)
+            # send_goal_async returns an rclpy Future, not asyncio — use spin_until_future_complete
+            goal_future = self.move_client.send_goal_async(goal_msg)
+            rclpy.spin_until_future_complete(self, goal_future)
+            goal_handle = goal_future.result()
+
             if not goal_handle.accepted:
                 self.get_logger().error('Goal rejected by MoveGroup.')
                 return False
 
-            result = await goal_handle.get_result_async()
+            result_future = goal_handle.get_result_async()
+            rclpy.spin_until_future_complete(self, result_future)
+            result = result_future.result()
+
             if result.result.error_code.val == MoveItErrorCodes.SUCCESS:
                 self.get_logger().info('Motion succeeded.')
                 return True
@@ -135,8 +137,10 @@ class PlayWaypoints(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = PlayWaypoints()
+    executor = MultiThreadedExecutor()
+    executor.add_node(node)
     try:
-        rclpy.spin(node)
+        executor.spin()
     except KeyboardInterrupt:
         pass
     finally:
