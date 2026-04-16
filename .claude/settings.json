@@ -5,7 +5,22 @@
       "Bash(grep -cP ',,|,$' /home/maleen/csvdata/rapplab04/csv/26_04_03_RAPP_M_R2G4_02.csv)",
       "Bash(grep -nP ',,|,$' /home/maleen/csvdata/rapplab04/csv/26_04_03_RAPP_M_R2G4_02.csv)",
       "Bash(chmod +x /home/maleen/git/RAPP_LAB_04/docker/hw/entrypoint.sh)",
-      "Bash(chmod +x /home/maleen/git/RAPP_LAB_04/docker/vam/entrypoint.sh)"
+      "Bash(chmod +x /home/maleen/git/RAPP_LAB_04/docker/vam/entrypoint.sh)",
+      "Bash(docker cp *)",
+      "Bash(chmod +x /home/maleen/git/RAPP_LAB_04/scripts/apply_prop_changes.sh)",
+      "Bash(mkdir -p profiles/bare profiles/team1 profiles/team2 profiles/team3)",
+      "Bash(cp tm12s.urdf.xacro profiles/bare/)",
+      "Bash(cp tm12s.srdf profiles/bare/)",
+      "Bash(cp tm12s.urdf.xacro profiles/team1/)",
+      "Bash(cp tm12s.srdf profiles/team1/)",
+      "Bash(chmod +x /home/maleen/git/RAPP_LAB_04/scripts/set_profile.sh)",
+      "Bash(/home/maleen/git/RAPP_LAB_04/scripts/set_profile.sh)",
+      "Bash(/home/maleen/git/RAPP_LAB_04/scripts/set_profile.sh bare *)",
+      "Bash(/home/maleen/git/RAPP_LAB_04/scripts/set_profile.sh nonexistent *)",
+      "Bash(sed 's/<robot name=\"tm12s\">/<robot name=\"tm12s\"><!-- INODE-TEST-MARKER -->/' /home/maleen/git/RAPP_LAB_04/docker/hw/urdf_override/profiles/bare/tm12s.urdf.xacro)",
+      "Bash(cp /tmp/test_xacro.xacro /home/maleen/git/RAPP_LAB_04/docker/hw/urdf_override/tm12s.urdf.xacro)",
+      "Bash(/home/maleen/git/RAPP_LAB_04/scripts/set_profile.sh team2 *)",
+      "Bash(/home/maleen/git/RAPP_LAB_04/scripts/set_profile.sh team1 *)"
     ]
   }
 }

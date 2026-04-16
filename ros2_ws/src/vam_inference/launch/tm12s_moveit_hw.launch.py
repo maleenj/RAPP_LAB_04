@@ -35,10 +35,11 @@ def generate_launch_description():
         .to_moveit_configs()
     )
 
-    moveit_config_path = "tm12s_moveit_config"
-    rviz_config_file = os.path.join(
-        get_package_share_directory(moveit_config_path), "rviz", "moveit.rviz"
-    )
+    rviz_config_file = "/data/rosbags/rapp_rvizconfig.rviz"
+    # moveit_config_path = "tm12s_moveit_config"
+    # rviz_config_file = os.path.join(
+    #     get_package_share_directory(moveit_config_path), "rviz", "moveit.rviz"
+    # )
 
     return LaunchDescription(
         [

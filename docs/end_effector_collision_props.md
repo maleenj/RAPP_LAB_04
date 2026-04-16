@@ -1,234 +1,487 @@
-# Adding End-Effector Props (Masks, Swords, etc.) with Collision Checking
+# End-Effector Props & Static Obstacles (Swords, Masks, Poles, Ground)
 
-## Problem
+This guide covers how to add, swap, and remove props on the robot end-effector
+(and static obstacles like the mounting pole / ground plane) so that the VAM
+PVT streamer's collision checking accounts for them.
 
-The VAM PVT streamer checks self-collision via MoveIt's `GetStateValidity` service, which uses the TM12S URDF collision meshes. If you attach a prop (mask, sword, etc.) to the end effector, the system doesn't know it exists -- the robot can swing the prop into its own body.
+## How It Works
 
-## Solution: Add a Collision Link to the URDF
+The PVT streamer calls MoveIt's `/check_state_validity` service every cycle to
+decide if a proposed joint target is safe. MoveIt uses the URDF collision
+meshes + SRDF collision rules that were loaded at `move_group` startup.
 
-The easiest, most reliable method is to **add a fixed link to the URDF** representing the prop. MoveIt will automatically include it in all collision checks -- no code changes needed.
+Any link added to the URDF is automatically included in every collision check.
+**No streamer code changes needed -- just URDF + SRDF edits.**
 
-### How It Works
-
-Your existing pipeline:
 ```
-VAM joint targets --> PVT Streamer --> MoveIt GetStateValidity --> Robot
+VAM joint targets -> PVT Streamer -> MoveIt /check_state_validity -> Robot
+                                            ^
+                                            | loads URDF + SRDF at startup
+                                            |
+                             tm12s.urdf.xacro + tm12s.srdf
+                             (bind-mounted from host into container)
 ```
-MoveIt loads the URDF at startup. If the URDF has an extra link attached to `link_6` (the end effector), every `GetStateValidity` call already checks collisions against it. **Zero code changes.**
+
+## Current Setup (Option A -- Bind Mounts)
+
+Two files are bind-mounted from host into the hardware container. With the
+profile workflow (see next section) you never need to restart the container
+to pick up changes -- edits propagate through the bind mount immediately:
+
+| Host path (edit here) | Container path (auto-mounted) |
+|---|---|
+| `/home/maleen/git/RAPP_LAB_04/docker/hw/urdf_override/tm12s.urdf.xacro` | `/tm2_ws/install/tm12s_moveit_config/share/tm12s_moveit_config/config/tm12s.urdf.xacro` |
+| `/home/maleen/git/RAPP_LAB_04/docker/hw/urdf_override/tm12s.srdf` | `/tm2_ws/install/tm12s_moveit_config/share/tm12s_moveit_config/config/tm12s.srdf` |
+
+The bind mounts are configured in [docker/docker-compose.hw.yml](../docker/docker-compose.hw.yml)
+lines 46-48.
+
+There is also a flat URDF used by RViz for VAM-prediction visualization:
+`/home/maleen/csvdata/rapplab04/tm12s.urdf`. This one is auto-regenerated from
+the xacro and doesn't need manual editing (see Step 4 below).
 
 ---
 
-## Step-by-Step Instructions
+## Performance Profiles (Recommended for Production)
 
-### Step 1: Understand the Two URDFs
+For performances where you need to swap between pre-built prop configurations
+(e.g., one per team), use **profiles**. Each profile is a self-contained pair
+of `tm12s.urdf.xacro` + `tm12s.srdf` files stored in
+`docker/hw/urdf_override/profiles/<name>/`.
 
-There are **two URDF files** involved during live operation. They serve different purposes:
+### Available profiles
 
-| File (host) | Container path | Launch file | Purpose |
-|---|---|---|---|
-| `tm2_ros2/tm12s_moveit_config/config/tm12s.urdf.xacro` | Built into ROS package | `tm12s_moveit_hw.launch.py` | **Collision checking** — MoveIt `move_group` loads this and serves `/check_state_validity` |
-| `/home/maleen/csvdata/rapplab04/tm12s.urdf` | `/data/processed/tm12s.urdf` | `vam_tm12s_robot.launch.py` | **RViz visualization** — `robot_state_publisher` uses this for TF frames |
-
-The PVT streamer queries MoveIt's `/check_state_validity` service, so **the xacro is what
-controls collision checking**. The CSV folder URDF is used live too, but only for visualization.
-
-**You must edit both** so that collision checking AND visualization include the prop:
-
-1. **Edit the xacro** (collision checking):
-   `/home/maleen/git/tm2_ros2/tm12s_moveit_config/config/tm12s.urdf.xacro`
-   Add the prop link right before the closing `</robot>` tag.
-
-2. **Regenerate the flat URDF** (visualization):
-   ```bash
-   # Inside the ROS container
-   xacro $(ros2 pkg prefix tm12s_moveit_config)/share/tm12s_moveit_config/config/tm12s.urdf.xacro \
-       > /data/processed/tm12s.urdf
-   ```
-
-3. **SRDF** (disable adjacent-link collision for prop):
-   `/home/maleen/git/tm2_ros2/tm12s_moveit_config/config/tm12s.srdf`
-
-### Step 2: Measure Your Prop
-
-You only need rough dimensions. Use simple shapes:
-
-| Prop Type | Best Shape | What to Measure |
-|-----------|-----------|-----------------|
-| Sword/stick | Cylinder | Length + diameter |
-| Mask/paddle | Box | Width x height x thickness |
-| Ball/round | Sphere | Radius |
-
-**Oversize by ~2cm** for safety margin.
-
-### Step 3: Add the Prop Link to the URDF
-
-Open the URDF and find `link_6` (the end effector). **After** the `link_6` definition and its joint, add:
-
-#### For a Sword / Stick (Cylinder)
-
-```xml
-<!-- ========== PROP: Sword ========== -->
-<joint name="prop_joint" type="fixed">
-  <parent link="link_6"/>
-  <child link="prop_link"/>
-  <!-- Offset from end-effector center. Z = forward along tool axis -->
-  <!-- Adjust xyz so the cylinder center aligns with the prop center -->
-  <origin xyz="0 0 0.30" rpy="0 0 0"/>
-</joint>
-
-<link name="prop_link">
-  <collision>
-    <geometry>
-      <!-- length = prop length, radius = prop radius + margin -->
-      <cylinder length="0.50" radius="0.03"/>
-    </geometry>
-  </collision>
-  <!-- Minimal inertia so URDF parser doesn't complain -->
-  <inertial>
-    <mass value="0.1"/>
-    <inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/>
-  </inertial>
-</link>
+```text
+docker/hw/urdf_override/profiles/
+├── bare/      # no prop, just pole + ground
+├── team1/     # team 1's prop config
+├── team2/     # team 2's prop config
+└── team3/     # team 3's prop config
 ```
 
-#### For a Mask / Flat Object (Box)
+Seeded initial state: all four profiles currently contain the bare setup
+(pole + ground, no end-effector prop). Fill in `team1/`, `team2/`, `team3/`
+as each team finalizes their prop design.
 
-```xml
-<!-- ========== PROP: Mask ========== -->
-<joint name="prop_joint" type="fixed">
-  <parent link="link_6"/>
-  <child link="prop_link"/>
-  <origin xyz="0 0 0.15" rpy="0 0 0"/>
-</joint>
+### Swap between profiles
 
-<link name="prop_link">
-  <collision>
-    <geometry>
-      <!-- width x thickness x height -->
-      <box size="0.25 0.05 0.30"/>
-    </geometry>
-  </collision>
-  <inertial>
-    <mass value="0.1"/>
-    <inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/>
-  </inertial>
-</link>
-```
-
-### Step 4: Get the Offset Right
-
-The `<origin xyz="0 0 Z">` in the joint sets where the prop center sits relative to `link_6`.
-
-- **Z axis** = along the tool (pointing outward from flange)
-- If your sword is 50cm long and starts at the flange: `Z = 0.25` (center at half length)
-- If your mask is 15cm from the flange: `Z = 0.15`
-
-**Quick way to verify:** Temporarily add a `<visual>` block with the same geometry so you can see it in RViz:
-```xml
-<link name="prop_link">
-  <visual>
-    <geometry>
-      <cylinder length="0.50" radius="0.03"/>
-    </geometry>
-    <material name="red">
-      <color rgba="1 0 0 0.5"/>
-    </material>
-  </visual>
-  <collision>
-    <geometry>
-      <cylinder length="0.50" radius="0.03"/>
-    </geometry>
-  </collision>
-  ...
-</link>
-```
-
-### Step 5: Update the SRDF (Important!)
-
-MoveIt uses the SRDF to disable collision checks between adjacent links (they always touch). You need to tell it **not** to check prop_link vs link_6 (they're welded together) but **do** check it vs everything else.
-
-The SRDF file is at:
-
-```
-/home/maleen/git/tm2_ros2/tm12s_moveit_config/config/tm12s.srdf
-```
-
-Add this line inside the `<robot>` tag:
-```xml
-<disable_collisions link1="link_6" link2="prop_link" reason="Adjacent"/>
-```
-
-**Do NOT add any other disable_collisions entries for prop_link** -- you want it checked against link_0 through link_5.
-
-### Step 6: Restart Everything
-
-The URDF is loaded at launch time. You must restart:
+One command, **no docker restart needed**:
 
 ```bash
-# Stop all containers
-docker compose -f docker/docker-compose.hw.yml down
+# List profiles (and show which is active)
+./scripts/set_profile.sh
 
-# Restart
-docker compose -f docker/docker-compose.hw.yml up
+# Activate a profile (copies files in-place + regenerates flat URDF)
+./scripts/set_profile.sh team1
 ```
 
-### Step 7: Verify in RViz
+How it stays container-restart-free: `set_profile.sh` uses `cp` to overwrite
+the bind-mounted active files. On Linux, `cp` truncates the target in place
+and writes new content, so the file's inode is preserved -- the running
+container sees the new content immediately.
 
-1. Open RViz and load the robot model
-2. Confirm the prop geometry appears attached to link_6
-3. Manually jog the robot (or replay a rosbag) and watch for collision highlights
-4. Test a pose where the sword/mask would hit the robot body -- MoveIt should flag it
+After `set_profile.sh` completes, Ctrl+C and re-run your three ROS launches.
+The launch restart is still needed because `move_group` caches the URDF in
+memory at launch time.
+
+### Edit a profile
+
+1. Edit `docker/hw/urdf_override/profiles/<name>/tm12s.urdf.xacro` and
+   `tm12s.srdf` directly (using the geometry recipes in the
+   "Step-by-Step: Add a New Prop" section below).
+2. Run `./scripts/set_profile.sh <name>` to apply.
+
+If the profile you edited is already active, re-running `set_profile.sh` still
+works — it re-copies and re-applies.
+
+### Create a new profile
+
+```bash
+cp -r docker/hw/urdf_override/profiles/bare docker/hw/urdf_override/profiles/my_new_profile
+# then edit docker/hw/urdf_override/profiles/my_new_profile/*.xacro / *.srdf
+./scripts/set_profile.sh my_new_profile
+```
 
 ---
 
-## Swapping Props Quickly
+## Quick Reference: Modify the Currently Active Config (Without Profiles)
 
-For fast prop changes between performances, you can parameterize the MoveIt launch file:
+If you're iterating on a single config and don't need profile swap machinery:
 
-1. **Create one xacro per prop** in `/home/maleen/git/tm2_ros2/tm12s_moveit_config/config/`:
+### To SWAP the prop (e.g., sword → mask)
 
-   ```
-   tm12s.urdf.xacro          (original, no prop)
-   tm12s_sword.urdf.xacro    (copy of original + sword link)
-   tm12s_mask.urdf.xacro     (copy of original + mask link)
-   ```
+1. Edit `docker/hw/urdf_override/tm12s.urdf.xacro`: replace the geometry block inside `<link name="prop_link">`
+2. Run `./scripts/apply_prop_changes.sh`
+3. Ctrl+C and restart your three ROS launches
 
-2. **Add a launch argument** to `tm12s_moveit_hw.launch.py`:
+### To REMOVE the prop (bare robot)
 
-   ```python
-   # Add a prop argument
-   DeclareLaunchArgument('prop', default_value='', description='Prop URDF suffix'),
+1. In `tm12s.urdf.xacro`: delete or comment out the `prop_joint` and `prop_link` blocks
+2. In `tm12s.srdf`: delete or comment out lines containing `prop_link`
+3. Run `./scripts/apply_prop_changes.sh`
+4. Restart ROS launches
 
-   # Change the MoveIt config builder to use it
-   urdf_file = 'config/tm12s.urdf.xacro'  # or tm12s_sword.urdf.xacro etc.
-   ```
+### To ADD a second prop
 
-3. **Launch with the prop URDF:**
+1. In `tm12s.urdf.xacro`: add another `prop2_joint` + `prop2_link` block
+2. In `tm12s.srdf`: add `<disable_collisions link1="link_6" link2="prop2_link" reason="Adjacent"/>` and `<disable_collisions link1="link_5" link2="prop2_link" reason="Never"/>`
+3. Run `./scripts/apply_prop_changes.sh`
+4. Restart ROS launches
 
-   ```bash
-   # This is the MoveIt launch -- it's where the URDF is loaded
-   ros2 launch vam_inference tm12s_moveit_hw.launch.py robot_ip:=192.168.10.2
-   ```
+**Note:** editing active files directly means your changes only live in the
+active location, not in any profile. For performance work, prefer editing
+inside a profile directory and using `set_profile.sh`.
 
-   The PVT streamer and VAM node launch commands stay exactly the same -- they don't need to know about the prop.
+---
+
+## Step-by-Step: Add a New Prop
+
+### Step 1 -- Measure your prop
+
+| Prop type | Collision shape | Parameters needed |
+|---|---|---|
+| Sword, stick, pointer | `<cylinder>` | length, radius |
+| Mask, paddle, flag | `<box>` | x (width) × y (thickness) × z (height) |
+| Ball, head | `<sphere>` | radius |
+| Complex mesh | `<mesh>` | STL file path |
+
+**Oversize the collision by ~2cm** to give a safety margin. For the visual you
+can use the true dimensions.
+
+### Step 2 -- Figure out the mount offset
+
+The prop attaches to `link_6` (the flange). In link_6's frame:
+
+- **Z axis points OUTWARD** from the flange (along the tool direction)
+- The joint `<origin xyz="X Y Z">` sets where the **center of the geometry**
+  sits, not where it starts
+- So for a 40cm cylinder with origin `z=0.30`, the cylinder extends from
+  `z=0.10` to `z=0.50` in link_6 frame
+
+**Rule of thumb:** leave 5-10cm between the flange and the start of your prop
+so the collision geometry clears link_5's housing.
+
+### Step 3 -- Edit the xacro
+
+Open `/home/maleen/git/RAPP_LAB_04/docker/hw/urdf_override/tm12s.urdf.xacro`.
+
+Find the existing `PROP` section and replace or modify. Template:
+
+```xml
+<!-- ==================== PROP: <NAME> ==================== -->
+<!-- <describe dimensions and orientation> -->
+<joint name="prop_joint" type="fixed">
+    <parent link="link_6"/>
+    <child link="prop_link"/>
+    <origin xyz="0 0 0.30" rpy="0 0 0"/>   <!-- adjust offset here -->
+</joint>
+
+<link name="prop_link">
+    <visual>
+        <geometry>
+            <!-- pick ONE: cylinder | box | sphere | mesh -->
+            <cylinder length="0.40" radius="0.015"/>
+        </geometry>
+        <material name="prop_color">
+            <color rgba="1.0 0.0 0.0 0.7"/>  <!-- R G B alpha -->
+        </material>
+    </visual>
+    <collision>
+        <geometry>
+            <!-- SAME shape type, but optionally slightly larger -->
+            <cylinder length="0.40" radius="0.02"/>
+        </geometry>
+    </collision>
+    <inertial>
+        <mass value="0.1"/>
+        <inertia ixx="0.001" ixy="0" ixz="0"
+                 iyy="0.001" iyz="0" izz="0.001"/>
+    </inertial>
+</link>
+```
+
+### Geometry recipes
+
+**Cylinder (sword, stick):**
+```xml
+<cylinder length="0.40" radius="0.015"/>
+```
+
+**Box (mask, paddle):**
+```xml
+<box size="0.25 0.03 0.30"/>   <!-- x y z in meters -->
+```
+
+**Sphere (ball, head):**
+```xml
+<sphere radius="0.10"/>
+```
+
+**Mesh (complex shape, optional):**
+```xml
+<mesh filename="file:///data/processed/my_prop.stl" scale="1 1 1"/>
+```
+
+### Orientation tricks
+
+If your prop isn't along link_6's Z axis, rotate the joint:
+
+```xml
+<!-- Mask flat, facing forward: flip so box Z -> link_6 Y -->
+<origin xyz="0 0 0.20" rpy="1.5708 0 0"/>
+
+<!-- Sword pointing sideways: rotate 90° around Y -->
+<origin xyz="0.20 0 0.10" rpy="0 1.5708 0"/>
+```
+
+### Step 4 -- Edit the SRDF
+
+Open `/home/maleen/git/RAPP_LAB_04/docker/hw/urdf_override/tm12s.srdf`.
+
+You **must** disable the collision check between the prop and the links it
+touches/is near. The standard two entries for a single prop:
+
+```xml
+<disable_collisions link1="link_6" link2="prop_link" reason="Adjacent"/>
+<disable_collisions link1="link_5" link2="prop_link" reason="Never"/>
+```
+
+**Never disable** collisions between prop_link and `link_0` through `link_4`
+or the pole/ground -- those are exactly the collisions you want detected.
+
+### Step 5 -- Apply the changes
+
+**No docker restart needed.** The profile swap script (and the underlying
+apply script) work entirely through `cp`, which preserves the bind-mounted
+inode -- the container sees new content immediately.
+
+If you edited a **profile** (under `profiles/<name>/`), use:
+
+```bash
+./scripts/set_profile.sh <name>
+```
+
+If you edited the **active** files directly (no profile), use:
+
+```bash
+./scripts/apply_prop_changes.sh
+```
+
+Then Ctrl+C and re-run your three ROS launches:
+
+```bash
+ros2 launch vam_inference tm12s_moveit_hw.launch.py robot_ip:=192.168.10.2
+ros2 run   vam_inference vam_pvt_streamer --ros-args -p velocity_scale:=0.15 ...
+ros2 launch vam_inference vam_tm12s_robot.launch.py ...
+```
+
+> The ROS launch restart is unavoidable -- `move_group` caches the URDF in memory
+> at launch time, so new xacro/srdf content only takes effect on fresh launches.
+
+#### What the scripts do
+
+**`set_profile.sh <name>`**
+
+1. `cp profiles/<name>/*.{xacro,srdf}` into the active location. `cp` on GNU
+   Linux truncates-in-place, preserving the inode, so the container's bind
+   mount sees the new content immediately -- no restart needed.
+2. Calls `apply_prop_changes.sh` to regenerate the flat URDF.
+3. Writes `.active_profile` marker.
+
+**`apply_prop_changes.sh`**
+
+1. Runs `docker exec rapp_hw xacro ... > /data/processed/tm12s.urdf` to
+   regenerate the flat URDF that `vam_tm12s_robot.launch.py` uses for
+   RViz VAM-prediction visualization.
+
+#### If you prefer the manual form
+
+```bash
+# Regenerate flat URDF only (one command inside the container)
+docker exec rapp_hw bash -c "
+  source /opt/ros/humble/setup.bash &&
+  source /tm2_ws/install/setup.bash &&
+  xacro /tm2_ws/install/tm12s_moveit_config/share/tm12s_moveit_config/config/tm12s.urdf.xacro \
+    > /data/processed/tm12s.urdf
+"
+```
+
+#### When you need what
+
+| What you changed | Need container restart? | Need flat URDF regen? | Need ROS launch restart? |
+| --- | --- | --- | --- |
+| Edited profile files, ran `set_profile.sh` | **No** | Done by script | Yes |
+| Edited active files with `cp` / `install` | **No** | Yes (run apply script) | Yes |
+| Edited active files with VSCode/editor | **Yes** (inode changed) | Yes | Yes |
+| Nothing URDF-related (launch params only) | No | No | Maybe |
+
+### Step 6 -- Verify
+
+In RViz:
+
+1. The new prop appears on the flange with the right colour
+2. The robot initially doesn't freeze (if it does → prop is in permanent collision, see Troubleshooting)
+3. Command a pose where the prop SHOULD hit the body → streamer logs collision warnings
+4. Command a safe pose → robot moves normally
+
+---
+
+## Inode Gotcha (only matters if you edit active files directly)
+
+This only applies if you edit `docker/hw/urdf_override/tm12s.urdf.xacro` or
+`tm12s.srdf` **directly** with an editor that does atomic-save-by-rename
+(VSCode, most IDEs, the Claude `Edit` tool). In that case the host file gets a
+new inode and the container's single-file bind mount keeps pointing at the
+old inode, so the container sees stale content.
+
+### How to avoid it
+
+**Use the profile workflow.** Edit files under `profiles/<name>/` (inode
+doesn't matter there -- nothing is bind-mounted from the profile dir). Then
+run `./scripts/set_profile.sh <name>`, which uses `cp` to overwrite the active
+files in-place -- this preserves the inode, so the container sees new content
+with zero restart.
+
+### If you did edit an active file directly and got stuck
+
+```bash
+docker compose -f docker/docker-compose.hw.yml restart
+```
+
+Takes ~5 seconds. The bind mount re-attaches to the current inode.
+
+### Quick sanity check that your edits propagated
+
+```bash
+docker exec rapp_hw grep prop_link \
+  /tm2_ws/install/tm12s_moveit_config/share/tm12s_moveit_config/config/tm12s.urdf.xacro
+```
+
+If this shows your new prop, you're good.
+
+---
+
+## Visual vs Collision: what RViz shows you
+
+- **Visual mesh** = the pretty green robot housing in RViz
+- **Collision mesh** = the simplified geometry MoveIt actually checks
+
+These often differ (collision is usually smaller/simpler for speed). You can
+see a prop visually clip through the robot in RViz **without** MoveIt flagging
+it -- that means the prop passed through visual-only space, not a collision
+volume.
+
+**Is this safe?** It depends:
+
+- Small cosmetic overlap in RViz, real-world prop doesn't actually touch the
+  robot → fine, nothing to fix
+- Prop visually passes *through* the robot body in RViz → real prop probably
+  will strike real robot → enlarge the prop's collision geometry (not visual)
+  and/or enlarge the relevant link collision geometry
+
+For safety-critical cases: oversize the prop's **collision** shape by 2-5cm
+relative to the visual shape.
 
 ---
 
 ## Troubleshooting
 
-| Issue | Fix |
-|-------|-----|
-| Robot won't move at all after adding prop | Prop is too large or offset is wrong -- it's always in collision. Reduce size or fix origin. |
-| URDF parse error on launch | Check XML syntax. Every `<joint>` needs matching `<link>`. Inertial block is required. |
-| Prop not showing in RViz | Add a `<visual>` block (see Step 4). Collision geometry is invisible by default. |
-| Collisions not being detected | Check SRDF -- make sure you only disabled `link_6 <-> prop_link`, not others. |
-| Robot moves but ignores prop | MoveIt might not have reloaded. Fully restart all nodes (not just the streamer). |
-| PVT streamer holds position too often | Prop geometry is too conservative (oversized). Shrink it slightly. |
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| Robot won't move at all after adding prop | Prop is in permanent collision with a non-disabled link | Check SRDF -- likely need to disable vs `link_5` too. Or prop geometry intersects another link's collision mesh -- increase Z offset |
+| Edits in host file don't show in container | Inode mismatch from atomic save | `docker compose restart` |
+| URDF parse error on launch | XML syntax issue | Look for unclosed tags; every `<link>` and `<joint>` needs matching close |
+| Prop missing in RViz | Flat URDF wasn't regenerated | Re-run Step 5 part 2 |
+| Prop shows in MoveIt but wrong position | Joint origin math | Remember the cylinder center is at the joint origin, not the near end |
+| Robot moves through prop in RViz but real prop would hit | Collision mesh smaller than visual | Oversize the `<collision>` geometry relative to `<visual>` |
+| Collision check causes lots of "holding position" warnings during normal motion | Prop collision geometry too conservative | Shrink the `<collision>` size |
 
-## Key Numbers to Remember
+---
 
-- Current self-collision threshold: **10mm** (`self_collision_proximity_threshold: 0.01`)
-- Current scene collision threshold: **20mm**
-- Collision check timeout in PVT streamer: **50ms**
-- Perturbation search radius: **0.08 rad (~4.6 deg)**
-- Adding a prop link adds negligible compute cost (one extra primitive in the collision check)
+## Current Config Snapshot (as of 2026-04-16)
+
+### Props in place
+
+**Sword (`prop_link`)**
+
+- 40cm long, 3cm diameter cylinder
+- Mounted on link_6 Z-axis, joint origin `z=0.30` (extends z=0.10 to z=0.50)
+- SRDF: disabled vs link_5 and link_6
+
+### Static obstacles in place
+
+**Pedestal pole (`pole_link`)**
+
+- 58cm tall, 15cm diameter cylinder
+- Mounted on `base`, joint origin `z=-0.29`
+- SRDF: disabled vs base, link_0, ground_link
+
+**Ground plane (`ground_link`)**
+
+- 20mm thick, 122cm diameter disc
+- Mounted on `base`, joint origin `z=-0.59`
+- SRDF: disabled vs base, pole_link, link_0
+
+---
+
+## Quick Rollback (Back to Bare Robot)
+
+If something breaks and you just want the baseline tm12s back:
+
+```bash
+# Remove the two bind-mount lines from docker-compose.hw.yml
+# (lines 46-48 are the URDF/SRDF override block)
+cd /home/maleen/git/RAPP_LAB_04/docker
+docker compose -f docker-compose.hw.yml down
+docker compose -f docker-compose.hw.yml up -d
+```
+
+The container falls back to the pristine xacro/srdf baked into the image. Re-add the
+mount lines when you want to resume using your prop setup. Host-side files are left intact.
+
+---
+
+## Example: Adding a Second Prop (e.g., sword + mask)
+
+Say you want a sword in one hand (link_6) and a mask attached slightly
+differently. URDF additions:
+
+```xml
+<!-- Sword (existing) -->
+<joint name="prop_joint" type="fixed">
+    <parent link="link_6"/>
+    <child link="prop_link"/>
+    <origin xyz="0 0 0.30" rpy="0 0 0"/>
+</joint>
+<link name="prop_link"> ... </link>
+
+<!-- Mask (new) -->
+<joint name="prop2_joint" type="fixed">
+    <parent link="link_6"/>
+    <child link="prop2_link"/>
+    <origin xyz="0 -0.15 0.10" rpy="1.5708 0 0"/>
+</joint>
+<link name="prop2_link">
+    <visual>
+        <geometry><box size="0.20 0.03 0.25"/></geometry>
+        <material name="mask_tan"><color rgba="0.8 0.6 0.4 0.9"/></material>
+    </visual>
+    <collision>
+        <geometry><box size="0.22 0.05 0.27"/></geometry>
+    </collision>
+    <inertial>
+        <mass value="0.1"/>
+        <inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/>
+    </inertial>
+</link>
+```
+
+SRDF additions:
+
+```xml
+<disable_collisions link1="link_6" link2="prop2_link" reason="Adjacent"/>
+<disable_collisions link1="link_5" link2="prop2_link" reason="Never"/>
+<disable_collisions link1="prop_link" link2="prop2_link" reason="Never"/>
+```
+
+Then: restart container, regenerate flat URDF, restart ROS launches.

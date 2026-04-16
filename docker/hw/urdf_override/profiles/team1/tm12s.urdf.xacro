@@ -1,0 +1,100 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="tm12s">
+    <xacro:arg name="initial_positions_file" default="initial_positions.yaml" />
+
+    <!-- Import tm12s urdf file -->
+    <xacro:include filename="$(find tm_description)/xacro/tm12s.urdf.xacro" />
+
+    <!-- Import control_xacro -->
+    <xacro:include filename="tm12s.ros2_control.xacro" />
+
+    <xacro:tm12s_ros2_control name="FakeSystem" initial_positions_file="$(arg initial_positions_file)"/>
+
+    <!-- ==================== PEDESTAL POLE ==================== -->
+    <!-- 580mm tall central pole supporting the robot; 150mm diameter -->
+    <!-- Extends downward from the robot base (base link is at top of pole) -->
+    <joint name="pole_joint" type="fixed">
+        <parent link="base"/>
+        <child link="pole_link"/>
+        <origin xyz="0 0 -0.29" rpy="0 0 0"/>
+    </joint>
+
+    <link name="pole_link">
+        <visual>
+            <geometry>
+                <cylinder length="0.58" radius="0.075"/>
+            </geometry>
+            <material name="pole_gray">
+                <color rgba="0.3 0.3 0.3 1.0"/>
+            </material>
+        </visual>
+        <collision>
+            <geometry>
+                <cylinder length="0.58" radius="0.075"/>
+            </geometry>
+        </collision>
+        <inertial>
+            <mass value="1.0"/>
+            <inertia ixx="0.1" ixy="0" ixz="0" iyy="0.1" iyz="0" izz="0.1"/>
+        </inertial>
+    </link>
+
+    <!-- ==================== GROUND PLANE ==================== -->
+    <!-- Circular base plate 1220mm diameter, 20mm thick, at the bottom of the pole -->
+    <joint name="ground_joint" type="fixed">
+        <parent link="base"/>
+        <child link="ground_link"/>
+        <origin xyz="0 0 -0.59" rpy="0 0 0"/>
+    </joint>
+
+    <link name="ground_link">
+        <visual>
+            <geometry>
+                <cylinder length="0.02" radius="0.61"/>
+            </geometry>
+            <material name="ground_dark">
+                <color rgba="0.2 0.2 0.2 1.0"/>
+            </material>
+        </visual>
+        <collision>
+            <geometry>
+                <cylinder length="0.02" radius="0.61"/>
+            </geometry>
+        </collision>
+        <inertial>
+            <mass value="1.0"/>
+            <inertia ixx="0.1" ixy="0" ixz="0" iyy="0.1" iyz="0" izz="0.1"/>
+        </inertial>
+    </link>
+
+    <!-- ==================== PROP: Sword (team1) ==================== -->
+    <!-- 40cm long, 3cm diameter cylinder attached to link_6 (Z+ out of flange) -->
+    <!-- Joint origin is the cylinder center; sword extends from z=0.10 to z=0.50 -->
+    <!-- (10cm clearance from flange for mount/handle, clears link_5 geometry) -->
+    <joint name="prop_joint" type="fixed">
+        <parent link="link_6"/>
+        <child link="prop_link"/>
+        <origin xyz="0 0 0.30" rpy="0 0 0"/>
+    </joint>
+
+    <link name="prop_link">
+        <visual>
+            <geometry>
+                <cylinder length="0.40" radius="0.015"/>
+            </geometry>
+            <material name="prop_red">
+                <color rgba="1.0 0.0 0.0 0.7"/>
+            </material>
+        </visual>
+        <collision>
+            <geometry>
+                <cylinder length="0.40" radius="0.015"/>
+            </geometry>
+        </collision>
+        <inertial>
+            <mass value="0.1"/>
+            <inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/>
+        </inertial>
+    </link>
+
+</robot>

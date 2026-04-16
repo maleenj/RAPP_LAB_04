@@ -43,6 +43,10 @@ services:
       - ../ros2_ws/src/vam_inference/config/tm12s_servo_vam.yaml:/tm2_ws/install/tm12s_moveit_config/share/tm12s_moveit_config/config/tm12s_servo_vam.yaml:ro
       - ../ros2_ws/src/vam_inference/config/tm12s_ros2_controllers.yaml:/tm2_ws/install/tm12s_moveit_config/share/tm12s_moveit_config/config/ros2_controllers.yaml:ro
 
+      # URDF/SRDF overrides for end-effector props (sword, mask, etc.)
+      - ./hw/urdf_override/tm12s.urdf.xacro:/tm2_ws/install/tm12s_moveit_config/share/tm12s_moveit_config/config/tm12s.urdf.xacro:ro
+      - ./hw/urdf_override/tm12s.srdf:/tm2_ws/install/tm12s_moveit_config/share/tm12s_moveit_config/config/tm12s.srdf:ro
+
       # Code directories (development mode)
       - ../vam_utils:/workspace/vam_utils:rw
       - ../notebooks_ur:/workspace/notebooks_ur:rw

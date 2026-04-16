@@ -14,16 +14,16 @@ models:
     norm_stats_path: "/data/processed/tensors/2026_04_05_tm12_mirror_pom/norm_stats.pt"
 
   2:
+    name: "contrast_pom"
+    description: "Contrast actor movement - POM trained 2026-04-13"
+    model_dir: "/data/models/vam_skelonly_tm12_contrast_pom20260413_1323"
+    norm_stats_path: "/data/processed/tensors/2026_04_13_tm12_contrast_pom/norm_stats.pt"
+
+  3:
     name: "mirror_basic"
     description: "Mirror actor - basic training"
     model_dir: "/data/models/vam_skelonly_tm12_20260404_0631"
     norm_stats_path: "/data/processed/tensors/2026_04_04_tm12/norm_stats.pt"
-
-  # 3:
-  #   name: "contrast"
-  #   description: "Contrast actor movement"
-  #   model_dir: "/data/models/..."
-  #   norm_stats_path: "/data/processed/tensors/.../norm_stats.pt"
 
   # 4:
   #   name: "custom"
