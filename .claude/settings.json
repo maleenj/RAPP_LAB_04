@@ -20,7 +20,8 @@
       "Bash(sed 's/<robot name=\"tm12s\">/<robot name=\"tm12s\"><!-- INODE-TEST-MARKER -->/' /home/maleen/git/RAPP_LAB_04/docker/hw/urdf_override/profiles/bare/tm12s.urdf.xacro)",
       "Bash(cp /tmp/test_xacro.xacro /home/maleen/git/RAPP_LAB_04/docker/hw/urdf_override/tm12s.urdf.xacro)",
       "Bash(/home/maleen/git/RAPP_LAB_04/scripts/set_profile.sh team2 *)",
-      "Bash(/home/maleen/git/RAPP_LAB_04/scripts/set_profile.sh team1 *)"
+      "Bash(/home/maleen/git/RAPP_LAB_04/scripts/set_profile.sh team1 *)",
+      "Bash(jupyter nbconvert *)"
     ]
   }
 }

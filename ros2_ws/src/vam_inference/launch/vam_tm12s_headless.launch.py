@@ -3,6 +3,12 @@
 Starts: robot_state_publishers, static transforms, and the inference node.
 Run RViz separately from the ZED container where meshes are available.
 
+Model selection follows the same registry pattern as vam_tm12s_robot.launch.py:
+    ros2 launch vam_inference vam_tm12s_headless.launch.py active_model:=2
+
+Switch model at runtime via service:
+    ros2 service call /vam/switch_model vam_interfaces/srv/SwitchModel "{model_id: 2}"
+
 Usage:
     # In VAM container — play rosbag + launch inference
     ros2 bag play /data/rosbags/<name> --clock
@@ -15,6 +21,7 @@ Usage:
 import re
 from pathlib import Path
 
+from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
@@ -23,17 +30,6 @@ from launch_ros.actions import Node
 
 VAM_PREFIX = "vam/"
 TM12S_PLANNING_FRAME = "base"
-
-
-def _find_latest_model(prefix: str = "vam_skelonly_") -> str | None:
-    """Find the most recent model directory matching a prefix."""
-    models_dir = Path("/data/models")
-    if not models_dir.exists():
-        return None
-    matches = sorted(models_dir.glob(f"{prefix}*"))
-    if matches and (matches[-1] / "best.pt").exists():
-        return str(matches[-1])
-    return None
 
 
 def _prefix_urdf_tm12s(urdf_path: str, prefix: str) -> str:
@@ -59,31 +55,31 @@ def _prefix_urdf_tm12s(urdf_path: str, prefix: str) -> str:
 
 
 def generate_launch_description():
+    pkg_share = get_package_share_directory("vam_inference")
+
     # TM12S URDF — update path once exported
     tm12s_urdf_path = "/data/processed/tm12s.urdf"
     vam_urdf = _prefix_urdf_tm12s(tm12s_urdf_path, VAM_PREFIX)
 
-    # Auto-detect latest skeleton-only model, fall back to original
-    latest_skelonly = _find_latest_model("vam_skelonly_")
-    if latest_skelonly:
-        default_model_dir = latest_skelonly
-    else:
-        default_model_dir = "/data/models/vam_skelonly_tm12_20260404_0631"
+    # Model registry YAML — defines all available models.
+    # Select which model to load via active_model argument.
+    default_models_config = str(
+        Path(pkg_share) / "config" / "vam_models.yaml"
+    )
 
     return LaunchDescription(
         [
             DeclareLaunchArgument("use_sim_time", default_value="false"),
             DeclareLaunchArgument(
-                "checkpoint_path",
-                default_value=f"{default_model_dir}/best.pt",
+                "models_config",
+                default_value=default_models_config,
+                description="Path to vam_models.yaml model registry.",
             ),
             DeclareLaunchArgument(
-                "model_config_path",
-                default_value=f"{default_model_dir}/model_config.json",
-            ),
-            DeclareLaunchArgument(
-                "norm_stats_path",
-                default_value="/data/processed/tensors/2026_04_04_tm12/norm_stats.pt",
+                "active_model",
+                default_value="1",
+                description="Model ID to load from registry (1, 2, 3, ...). "
+                "Switch at runtime via /vam/switch_model service.",
             ),
             DeclareLaunchArgument("device", default_value="cuda"),
             DeclareLaunchArgument(
@@ -169,6 +165,7 @@ def generate_launch_description():
             ),
 
             # --- VAM TM12S inference node (rviz mode) ---
+            # Service: /vam/switch_model (vam_interfaces/srv/SwitchModel)
             Node(
                 package="vam_inference",
                 executable="vam_tm12s_node",
@@ -177,11 +174,8 @@ def generate_launch_description():
                 parameters=[
                     {
                         "mode": "rviz",
-                        "checkpoint_path": LaunchConfiguration("checkpoint_path"),
-                        "model_config_path": LaunchConfiguration(
-                            "model_config_path"
-                        ),
-                        "norm_stats_path": LaunchConfiguration("norm_stats_path"),
+                        "models_config": LaunchConfiguration("models_config"),
+                        "active_model": LaunchConfiguration("active_model"),
                         "device": LaunchConfiguration("device"),
                         "max_joint_velocity_rad_s": LaunchConfiguration(
                             "max_joint_velocity_rad_s"
