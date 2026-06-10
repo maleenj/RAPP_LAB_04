@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<!--
+  vam_viz_bridge — browser test page.
+
+  The fastest way to confirm the live stream, and a reference implementation for
+  Unity / Unreal client authors: connect via WebSocket, parse the uniform JSON
+  frame, switch on `channel`. Renders joint angles as bars and any 2-D tensor
+  (e.g. an attention map) as a heatmap on a canvas.
+
+  Open it directly (file://) or serve the folder:  python3 -m http.server
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>VAM Viz Bridge — live</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 1.5rem; background:#111; color:#eee; }
+    h1 { font-size: 1.1rem; }
+    #status { padding:.3rem .6rem; border-radius:.4rem; display:inline-block; }
+    .ok { background:#1a5; } .bad { background:#a33; }
+    input { font-size:1rem; padding:.3rem; width:22rem; background:#222; color:#eee; border:1px solid #444; }
+    button { font-size:1rem; padding:.3rem .8rem; }
+    .channel { margin:1rem 0; padding:.6rem; background:#1b1b1b; border-radius:.5rem; }
+    .channel h2 { font-size:.95rem; margin:.2rem 0; color:#9cf; }
+    .bar { height:14px; background:#3a7; margin:2px 0; border-radius:2px; }
+    .label { font-size:.75rem; color:#aaa; }
+    canvas { background:#000; border:1px solid #333; image-rendering: pixelated; }
+    code { color:#fc9; }
+  </style>
+</head>
+<body>
+  <h1>VAM Viz Bridge — live stream</h1>
+  <p>
+    <input id="url" value="ws://localhost:8765" />
+    <button id="connect">Connect</button>
+    <span id="status" class="bad">disconnected</span>
+  </p>
+  <div id="channels"></div>
+
+<script>
+const channelsEl = document.getElementById('channels');
+const statusEl = document.getElementById('status');
+const panels = {};      // channel -> DOM element
+const rate = {};        // channel -> {count, last, hz}
+let ws = null;
+
+function panelFor(channel) {
+  if (panels[channel]) return panels[channel];
+  const div = document.createElement('div');
+  div.className = 'channel';
+  div.innerHTML = `<h2>${channel} <span class="label" id="hz-${channel}"></span></h2>
+                   <div id="body-${channel}"></div>`;
+  channelsEl.appendChild(div);
+  panels[channel] = div;
+  rate[channel] = { count: 0, last: performance.now(), hz: 0 };
+  return div;
+}
+
+function tickRate(channel) {
+  const r = rate[channel];
+  r.count++;
+  const now = performance.now();
+  if (now - r.last > 1000) {
+    r.hz = (r.count * 1000) / (now - r.last);
+    r.count = 0; r.last = now;
+    document.getElementById(`hz-${channel}`).textContent = `${r.hz.toFixed(1)} Hz`;
+  }
+}
+
+function renderVector(channel, shape, data, labels) {
+  panelFor(channel);
+  const body = document.getElementById(`body-${channel}`);
+  // Normalize each value to a bar width vs the max abs in this frame.
+  const maxAbs = Math.max(1e-6, ...data.map(Math.abs));
+  body.innerHTML = data.map((v, i) => {
+    const w = (Math.abs(v) / maxAbs) * 100;
+    const name = (labels && labels[i]) ? labels[i] : `[${i}]`;
+    return `<div class="label">${name}: ${v.toFixed(4)}</div>
+            <div class="bar" style="width:${w}%"></div>`;
+  }).join('');
+}
+
+function renderHeatmap(channel, name, shape, data) {
+  const id = `${channel}-${name}`;
+  panelFor(channel);
+  const body = document.getElementById(`body-${channel}`);
+  let canvas = document.getElementById(`cv-${id}`);
+  // Use the last two dims as rows x cols; collapse leading dims by averaging.
+  const cols = shape[shape.length - 1];
+  const rows = shape.length >= 2 ? shape[shape.length - 2] : 1;
+  const planes = data.length / (rows * cols);
+  if (!canvas) {
+    const wrap = document.createElement('div');
+    wrap.innerHTML = `<div class="label">${name} ${JSON.stringify(shape)}</div>`;
+    canvas = document.createElement('canvas');
+    canvas.id = `cv-${id}`;
+    canvas.width = cols; canvas.height = rows;
+    canvas.style.width = (cols * 18) + 'px';
+    canvas.style.height = (rows * 18) + 'px';
+    wrap.appendChild(canvas);
+    body.appendChild(wrap);
+  }
+  const ctx = canvas.getContext('2d');
+  const img = ctx.createImageData(cols, rows);
+  // Average across leading planes (e.g. heads/layers) for a single map.
+  const cell = new Float32Array(rows * cols);
+  for (let p = 0; p < planes; p++)
+    for (let k = 0; k < rows * cols; k++)
+      cell[k] += data[p * rows * cols + k] / planes;
+  const max = Math.max(1e-6, ...cell);
+  for (let k = 0; k < rows * cols; k++) {
+    const t = cell[k] / max;            // 0..1
+    img.data[k*4+0] = Math.floor(255 * t);
+    img.data[k*4+1] = Math.floor(80 * t);
+    img.data[k*4+2] = Math.floor(255 * (1 - t));
+    img.data[k*4+3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+function handleFrame(frame) {
+  const channel = frame.channel || '?';
+  tickRate(channel);
+  if (frame.tensors) {
+    for (const [name, t] of Object.entries(frame.tensors)) {
+      if (t.shape.length >= 2) renderHeatmap(channel, name, t.shape, t.data);
+      else renderVector(channel + ':' + name, t.shape, t.data);
+    }
+  } else if (frame.shape && frame.shape.length >= 2) {
+    renderHeatmap(channel, 'map', frame.shape, frame.data);
+  } else if (frame.data) {
+    renderVector(channel, frame.shape, frame.data, frame.labels);
+  }
+}
+
+function connect() {
+  const url = document.getElementById('url').value;
+  if (ws) ws.close();
+  ws = new WebSocket(url);
+  ws.onopen = () => { statusEl.textContent = 'connected'; statusEl.className = 'ok'; };
+  ws.onclose = () => { statusEl.textContent = 'disconnected'; statusEl.className = 'bad'; };
+  ws.onerror = () => { statusEl.textContent = 'error'; statusEl.className = 'bad'; };
+  ws.onmessage = (e) => { try { handleFrame(JSON.parse(e.data)); } catch (_) {} };
+}
+
+document.getElementById('connect').onclick = connect;
+</script>
+</body>
+</html>

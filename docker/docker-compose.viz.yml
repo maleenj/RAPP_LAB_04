@@ -1,0 +1,42 @@
+###############################################
+# VAM Visualization Bridge Container
+#
+# Independent stack — does NOT touch docker-compose.yml (rapp-vam) or
+# docker-compose.hw.yml (rapp-hw). Lightweight: no GPU, no PyTorch.
+#
+# Usage:
+#   cd docker
+#   docker compose -f docker-compose.viz.yml up -d --build
+#   docker logs -f rapp_viz          # see the host IP to give clients
+#   docker exec -it rapp_viz bash    # for ros2 run vam_viz_bridge test_client
+###############################################
+
+name: rapp-viz
+
+services:
+  viz:
+    build:
+      context: ./viz
+      dockerfile: Dockerfile
+    container_name: rapp_viz
+    hostname: viz-container
+
+    # Host networking: sees all ROS topics with zero setup, and ws://<host-ip>:8765
+    # is reachable directly from any laptop on the LAN (no port mapping needed).
+    network_mode: host
+
+    environment:
+      - ROS_DOMAIN_ID=0
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - RCUTILS_COLORIZED_OUTPUT=1
+
+    volumes:
+      # Mount the ROS workspace so the bridge package builds in-container into an
+      # isolated install dir (install_viz) — never collides with the inference build.
+      - ../ros2_ws:/ws/ros2_ws:rw
+      # Custom entrypoint (mounted so edits apply without rebuild).
+      - ./viz/entrypoint.sh:/entrypoint_viz.sh:ro
+
+    stdin_open: true
+    tty: true
+    restart: unless-stopped

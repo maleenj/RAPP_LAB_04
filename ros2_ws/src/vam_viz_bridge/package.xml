@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>vam_viz_bridge</name>
+  <version>0.1.0</version>
+  <description>Config-driven WebSocket bridge that streams ROS2 topics (joint angles,
+    NN activations, arbitrary numeric arrays) to Unity/Unreal clients for live
+    workshop visualization.</description>
+  <maintainer email="maleen@rapplab.org">Maleen</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <depend>rclpy</depend>
+  <depend>std_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <!-- Optional: only needed if a channel bridges the ZED skeleton topic.
+       The bridge degrades gracefully (logs a warning, skips the channel) if absent. -->
+  <exec_depend>zed_msgs</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

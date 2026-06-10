@@ -1,0 +1,49 @@
+# vam_viz_bridge channel map
+# ---------------------------
+# Each entry under `channels` taps one ROS2 topic and re-publishes it to all
+# connected WebSocket clients under the given `channel` name.
+#
+# To add a new data source: add ONE entry below. No code change is needed for any
+# topic whose message type is already supported (JointState, Float32/64MultiArray,
+# zed ObjectsStamped). A genuinely new message type needs one serializer function
+# in serializers.py.
+#
+# Optional keys per channel:
+#   serializer:  override the auto-picked serializer (e.g. "multiarray_named")
+#   qos:         "default" (reliable) | "sensor" (best-effort, for high-rate data)
+
+server:
+  websocket:
+    enabled: true
+    host: "0.0.0.0"   # bind all interfaces; clients connect to ws://<host-ip>:8765
+    port: 8765
+
+channels:
+  # Predicted "ghost" joints from the VAM (what the model wants the robot to do).
+  - topic: "/vam/joint_states"
+    type: "sensor_msgs/msg/JointState"
+    channel: "joint_states"
+
+  # Normalized joint targets stream sent to the PVT streamer.
+  - topic: "/vam/joint_targets"
+    type: "std_msgs/msg/Float64MultiArray"
+    channel: "joint_targets"
+
+  # Real robot joints (actual measured positions).
+  - topic: "/joint_states"
+    type: "sensor_msgs/msg/JointState"
+    channel: "robot_joint_states"
+
+  # --- Phase 2: NN internal activations (uncomment after launching inference
+  #     with publish_activations:=true). Requires nothing extra here. ---
+  # - topic: "/vam/activations"
+  #   type: "std_msgs/msg/Float32MultiArray"
+  #   channel: "activations"
+  #   serializer: "multiarray_named"
+
+  # --- Example: stream the raw ZED skeleton too (needs zed_msgs in the image) ---
+  # - topic: "/zed/zed_node/body_trk/skeletons"
+  #   type: "zed_msgs/msg/ObjectsStamped"
+  #   channel: "skeleton"
+  #   serializer: "zed_skeleton"
+  #   qos: "sensor"

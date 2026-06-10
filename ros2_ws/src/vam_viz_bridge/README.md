@@ -1,0 +1,265 @@
+# vam_viz_bridge — live visualization streaming
+
+Stream live data from the VAM (joint angles, and later neural-network internal
+activations) over WiFi to **Unity, Unreal, or a browser** running on workshop
+attendees' laptops. Plug-and-play: if you're on the network, you can receive the
+stream.
+
+This is a **standalone module**. It does not modify the inference pipeline — it
+just taps the ROS2 topic graph (all containers run host networking + a shared
+`ROS_DOMAIN_ID`, so the bridge sees every topic with zero setup) and fans each
+message out as a uniform JSON frame.
+
+```
+ existing ROS topics ─┐
+  /vam/joint_states    │   ┌──────────────────┐   ws://<host-ip>:8765   ┌── Unity laptop
+  /vam/joint_targets   ├──▶│  vam_viz_bridge  │──── JSON frames ────────┼── Unreal laptop
+  /joint_states        │   │ (config-driven)  │   (broadcast)           ├── browser test page
+  /vam/activations*    ┘   └──────────────────┘                         └── big screen
+  (* Phase 2, opt-in)
+```
+
+---
+
+## Quick start
+
+```bash
+cd docker
+docker compose -f docker-compose.viz.yml up -d --build
+docker logs -f rapp_viz        # prints the host IP(s) to hand to clients
+```
+
+The log prints something like:
+
+```
+Connect clients to ws://<HOST-IP>:8765  — host IP(s):
+    192.168.10.1
+```
+
+That `ws://192.168.10.1:8765` is what every client connects to.
+
+> The bridge works against the **live robot**, **headless inference**, or a
+> **rosbag replay** — it only needs the topics to exist on the network.
+
+---
+
+## Verify the stream (no game engine needed)
+
+**CLI test client** (inside the container):
+
+```bash
+docker exec -it rapp_viz bash
+ros2 run vam_viz_bridge test_client
+# or from any machine with python:  python3 -m vam_viz_bridge.test_client ws://<host-ip>:8765
+```
+
+You should see per-channel frames and a measured rate (~15 Hz for joints).
+
+**Browser test page** — open `web/index.html` (double-click, or
+`python3 -m http.server` in the `web/` folder), type `ws://<host-ip>:8765`,
+click **Connect**. Joint angles render as bars; 2-D tensors (attention maps)
+render as a heatmap. This page is also the reference client implementation.
+
+**Pure-ROS sanity check** (is the upstream data even there?):
+
+```bash
+ros2 topic hz /vam/joint_states
+ros2 topic echo /vam/joint_states --once
+```
+
+---
+
+## The JSON frame (one parser for every channel)
+
+Each WebSocket message is one JSON object:
+
+```json
+{
+  "channel": "joint_states",
+  "stamp": 1749567890.123,
+  "shape": [6],
+  "data": [0.01, -1.57, 1.2, 0.0, 0.3, -0.1],
+  "labels": ["joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6"]
+}
+```
+
+`shape` + flat `data` lets a client reshape without knowing anything about ROS.
+Messages that carry several named tensors (e.g. NN activations) use `tensors`
+instead of `shape`/`data`:
+
+```json
+{
+  "channel": "activations",
+  "stamp": 1749567890.130,
+  "tensors": {
+    "encoder_out":     { "shape": [10, 128], "data": [ ... ] },
+    "encoder_selfattn":{ "shape": [3, 4, 10, 10], "data": [ ... ] }
+  }
+}
+```
+
+---
+
+## Channels (default config)
+
+| Channel | Source topic | Shape | Notes |
+|---|---|---|---|
+| `joint_states` | `/vam/joint_states` | `[6]` | VAM predicted ("ghost") joints, ~15 Hz, has `labels` |
+| `joint_targets` | `/vam/joint_targets` | `[6]` | normalized targets sent to PVT streamer |
+| `robot_joint_states` | `/joint_states` | `[N]` | real measured robot joints, has `labels` |
+| `activations` | `/vam/activations` | tensors | **Phase 2**, opt-in (see below) |
+
+Edit channels in `config/bridge_channels.yaml`.
+
+---
+
+## Connecting from Unity
+
+1. Install **NativeWebSocket** (Package Manager → add from git URL
+   `https://github.com/endel/NativeWebSocket.git#upm`).
+2. Minimal receiver:
+
+```csharp
+using NativeWebSocket;
+using UnityEngine;
+
+public class VamStream : MonoBehaviour {
+    WebSocket ws;
+
+    async void Start() {
+        ws = new WebSocket("ws://192.168.10.1:8765");   // <- host IP from the log
+        ws.OnMessage += (bytes) => {
+            var json = System.Text.Encoding.UTF8.GetString(bytes);
+            var frame = JsonUtility.FromJson<Frame>(json);
+            if (frame.channel == "joint_states") {
+                // frame.data is float[]; drive your rig here
+            }
+        };
+        await ws.Connect();
+    }
+
+    void Update() {
+        #if !UNITY_WEBGL || UNITY_EDITOR
+        ws?.DispatchMessageQueue();
+        #endif
+    }
+
+    async void OnApplicationQuit() { if (ws != null) await ws.Close(); }
+
+    [System.Serializable]
+    public class Frame { public string channel; public double stamp; public int[] shape; public float[] data; public string[] labels; }
+}
+```
+
+> `JsonUtility` does not handle the nested `tensors` object — for the activations
+> channel use a JSON lib like Newtonsoft (com.unity.nuget.newtonsoft-json) and
+> parse `tensors` as a dictionary.
+
+## Connecting from Unreal
+
+Unreal ships a built-in **WebSockets** module — no marketplace plugin needed.
+
+1. In your `.Build.cs`: add `"WebSockets"` and `"Json"` to `PublicDependencyModuleNames`.
+2. Minimal connect:
+
+```cpp
+#include "WebSocketsModule.h"
+#include "IWebSocket.h"
+
+TSharedPtr<IWebSocket> Socket =
+    FWebSocketsModule::Get().CreateWebSocket(TEXT("ws://192.168.10.1:8765"));
+
+Socket->OnMessage().AddLambda([](const FString& Msg) {
+    TSharedPtr<FJsonObject> Obj;
+    auto Reader = TJsonReaderFactory<>::Create(Msg);
+    if (FJsonSerializer::Deserialize(Reader, Obj)) {
+        const FString Channel = Obj->GetStringField(TEXT("channel"));
+        const TArray<TSharedPtr<FJsonValue>>* Data;
+        if (Channel == TEXT("joint_states") && Obj->TryGetArrayField(TEXT("data"), Data)) {
+            // (*Data)[i]->AsNumber()  -> drive your rig
+        }
+    }
+});
+Socket->Connect();
+```
+
+---
+
+## Adding a new data source (the scalable bit)
+
+**A new ROS topic** of an already-supported type — add ONE entry to
+`config/bridge_channels.yaml` and restart the bridge:
+
+```yaml
+  - topic: "/my/new_topic"
+    type: "std_msgs/msg/Float64MultiArray"
+    channel: "my_data"
+```
+
+**An arbitrary Python state vector** that isn't on ROS yet — publish it to a
+topic first (the topic graph is the universal bus), then add the config line:
+
+```python
+from std_msgs.msg import Float32MultiArray
+pub = node.create_publisher(Float32MultiArray, "/vam/my_state", 10)
+pub.publish(Float32MultiArray(data=my_vector.tolist()))
+```
+
+**A genuinely new message type** — add one function to `serializers.py` and
+register it in `SERIALIZERS`, then reference it via `serializer:` in config.
+
+Supported serializers out of the box: `joint_state`, `multiarray`,
+`multiarray_named`, `zed_skeleton`, `generic_numeric` (auto-fallback).
+
+---
+
+## Phase 2 — neural-network activations (opt-in)
+
+Off by default. To stream internal activations, launch the inference node with
+`publish_activations:=true` — works on the **real robot** and **headless**:
+
+```bash
+# Real robot (your normal command + one arg):
+ros2 launch vam_inference vam_tm12s_robot.launch.py \
+    feedback_gain:=25.0 feedback_max_vel:=50.0 \
+    max_joint_velocity_rad_s:=400.0 max_joint_acceleration_rad_s2:=400.0 \
+    control_rate_hz:=100. \
+    publish_activations:=true
+
+# Headless:
+ros2 launch vam_inference vam_tm12s_headless.launch.py publish_activations:=true
+```
+
+Choose which activations with `activation_set:='[encoder_out, encoder_selfattn]'`.
+Then uncomment the `activations` channel in `config/bridge_channels.yaml` and
+restart the bridge. With the arg omitted, the inference pipeline is byte-for-byte
+unchanged.
+
+---
+
+## Troubleshooting
+
+| Symptom | Check |
+|---|---|
+| Client connects but no frames | Is the upstream topic publishing? `ros2 topic hz /vam/joint_states` |
+| Client can't reach `ws://...` | WiFi **client isolation** (AP setting) blocks laptop↔host; use a switch/router that allows it. Also check the host firewall on port 8765. |
+| Bridge logs no channels | A message type couldn't be imported (e.g. `zed_msgs`) — it logs a warning and skips that channel. |
+| Frames lag / stutter | Expected on a slow client — the bridge is latest-frame-wins, so a slow laptop just sees newer data, it never backs up the robot. |
+
+---
+
+## Files
+
+```
+vam_viz_bridge/
+├── config/bridge_channels.yaml     # topic -> channel map (add sources here)
+├── launch/viz_bridge.launch.py
+├── vam_viz_bridge/
+│   ├── viz_bridge_node.py          # config-driven subs + WebSocket fan-out
+│   ├── serializers.py              # ROS msg -> uniform dict (add new types here)
+│   ├── websocket_server.py         # asyncio broadcast server (latest-frame-wins)
+│   └── test_client.py              # CLI verification client
+└── web/index.html                  # browser test page + reference client
+```
+
+Docker: `docker/docker-compose.viz.yml`, `docker/viz/{Dockerfile,entrypoint.sh}`.

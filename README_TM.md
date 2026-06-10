@@ -84,6 +84,8 @@ ros2 launch vam_inference vam_tm12s_headless.launch.py use_sim_time:=true
 rviz2 -d /data/processed/vam_tm12s.rviz
 ```
 
+Pick a specific model with `active_model:=N` or hot-swap at runtime — same registry + service as the robot launch (see [Model Management](#model-management)).
+
 ### Mode 2: Real Robot with Rosbag Skeleton Data
 
 Control the real TM12S using skeleton data from a rosbag. Uses **direct PVT streaming** — VAM joint targets are sent to the TM12S firmware as PVT (Position-Velocity-Time) points. The firmware performs cubic spline interpolation between points at 1kHz+.
@@ -126,6 +128,29 @@ Same as Mode 2, but replace the rosbag terminal with the ZED camera:
 # Terminal 3 (rapp_hw): ZED camera (replaces rosbag)
 ros2 launch zed_wrapper zed_camera.launch.py camera_model:=zed2i
 ```
+
+### Mode 4: Live Camera Preview (virtual robot)
+
+Live ZED camera driving a **ghost** TM12S in RViz — no real robot, no PVT streamer. Useful for verifying a model against a live performer before running it on hardware, or for demos without the arm.
+
+```bash
+# Terminal 1 (rapp_hw): Real ZED camera with body tracking
+ros2 launch vam_inference zed2i_camera.launch.py
+
+# Terminal 2 (rapp_vam): VAM inference + ghost robot (wall-clock, no rosbag)
+ros2 launch vam_inference vam_tm12s_headless.launch.py use_sim_time:=false
+
+# Terminal 3 (rapp_hw): RViz with TM12S config
+rviz2 -d /data/processed/vam_tm12s.rviz
+```
+
+Notes:
+
+- `use_sim_time:=false` is required — live ZED runs on wall-clock, unlike the rosbag-replay path in Mode 1.
+- The launch publishes a static `map → zed_camera_link` identity transform. Fine for ghost-only sanity-checking; **do not** reuse this transform when running the real arm — calibrate it first.
+- No PVT streamer, no collision check, no velocity/acceleration limits are enforced by the streamer (none of those nodes are running). The only safety in this mode is the VAM node's joint-limit clamping.
+- Pick or hot-swap the model the same way as Mode 1 — `active_model:=N` at launch or `/vam/switch_model` at runtime.
+- A second non-prefixed "real" robot model may appear in RViz at the zero pose because nothing publishes `/joint_states`. Hide that RobotModel display if it's distracting.
 
 ## Model Management
 
@@ -245,9 +270,10 @@ The key insight: let the feedback loop run fast and responsive, and use `velocit
 
 | Launch File | Mode | Use Case |
 |---|---|---|
-| `vam_tm12s_headless.launch.py` | headless | Inference + robot_state_publishers, no RViz (run RViz from rapp_hw) |
+| `vam_tm12s_headless.launch.py` | rviz | Inference + ghost robot, no real arm. Used by Mode 1 (rosbag) and Mode 4 (live ZED). Supports `active_model:=N` and `/vam/switch_model`. |
 | `vam_tm12s_robot.launch.py` | robot | VAM inference + ghost robot + static transforms (no MoveIt Servo) |
 | `tm12s_moveit_hw.launch.py` | robot | MoveIt + TM driver + RViz for real hardware |
+| `zed2i_camera.launch.py` | rviz/robot | ZED2i with body tracking + RAPP override config |
 
 **Standalone node** (run separately in rapp_hw):
 
