@@ -34,12 +34,13 @@ channels:
     type: "sensor_msgs/msg/JointState"
     channel: "robot_joint_states"
 
-  # --- Phase 2: NN internal activations (uncomment after launching inference
-  #     with publish_activations:=true). Requires nothing extra here. ---
-  # - topic: "/vam/activations"
-  #   type: "std_msgs/msg/Float32MultiArray"
-  #   channel: "activations"
-  #   serializer: "multiarray_named"
+  # --- Phase 2: NN internal activations (the "brain scan"). Streamed when the
+  #     viz inference node runs (vam_tm12s_node_viz / vam_tm12s_robot_viz.launch.py).
+  #     Harmless if no one publishes /vam/activations — the channel just stays idle. ---
+  - topic: "/vam/activations"
+    type: "std_msgs/msg/Float32MultiArray"
+    channel: "activations"
+    serializer: "multiarray_named"
 
   # --- Example: stream the raw ZED skeleton too (needs zed_msgs in the image) ---
   # - topic: "/zed/zed_node/body_trk/skeletons"
@@ -47,3 +48,14 @@ channels:
   #   channel: "skeleton"
   #   serializer: "zed_skeleton"
   #   qos: "sensor"
+
+# Derived explainability metrics — computed in THIS (viz) container from the raw
+# activations, then broadcast as their own channels. Add/tweak freely and restart
+# only rapp_viz; the inference node is never touched.
+derived:
+  - from: activations
+    transform: attention_entropy
+    channel: attn_entropy
+  - from: activations
+    transform: activation_norm
+    channel: activation_energy

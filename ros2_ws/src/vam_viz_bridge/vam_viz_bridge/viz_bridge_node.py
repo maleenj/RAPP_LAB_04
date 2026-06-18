@@ -90,7 +90,10 @@ class VizBridgeNode(Node):
 
         self._subs = []
         self._frame_counts: Dict[str, int] = {}
+        # derived[source_channel] -> list of (out_channel, transform_fn)
+        self._derived: Dict[str, list] = {}
         self._setup_channels(cfg.get("channels") or [])
+        self._setup_derived(cfg.get("derived") or [])
 
         # Periodic heartbeat so operators see life + client count in the log.
         self.create_timer(5.0, self._heartbeat)
@@ -131,6 +134,31 @@ class VizBridgeNode(Node):
                 f" (serializer={serializer.__name__})"
             )
 
+    def _setup_derived(self, derived: list) -> None:
+        """Wire config-driven derived channels: source channel -> transform -> new channel.
+
+        Transforms run in THIS (viz) container, keeping all explainability math out
+        of the inference node. Imported lazily so the bridge still runs without numpy
+        when no derived channels are configured.
+        """
+        if not derived:
+            return
+        from vam_viz_bridge import transforms  # lazy: needs numpy
+
+        for entry in derived:
+            src = entry["from"]
+            out_channel = entry["channel"]
+            try:
+                fn = transforms.resolve_transform(entry["transform"])
+            except KeyError as exc:
+                self.get_logger().error(f"Derived '{out_channel}': {exc}")
+                continue
+            self._derived.setdefault(src, []).append((out_channel, fn))
+            self._frame_counts[out_channel] = 0
+            self.get_logger().info(
+                f"derived '{out_channel}' = {entry['transform']}({src})"
+            )
+
     def _make_callback(self, channel: str, serializer):
         def _cb(msg) -> None:
             try:
@@ -144,8 +172,26 @@ class VizBridgeNode(Node):
                 frame["stamp"] = stamp
             self._frame_counts[channel] += 1
             self._server.broadcast(channel, frame)
+            self._emit_derived(channel, frame)
 
         return _cb
+
+    def _emit_derived(self, source_channel: str, frame: Dict[str, Any]) -> None:
+        """Run any transforms registered on this channel and broadcast results."""
+        configs = self._derived.get(source_channel)
+        if not configs or "tensors" not in frame:
+            return
+        for out_channel, fn in configs:
+            try:
+                dframe = fn(frame["tensors"])
+            except Exception as exc:
+                self.get_logger().warn(f"transform for '{out_channel}' failed: {exc}")
+                continue
+            dframe["channel"] = out_channel
+            if "stamp" in frame:
+                dframe["stamp"] = frame["stamp"]
+            self._frame_counts[out_channel] = self._frame_counts.get(out_channel, 0) + 1
+            self._server.broadcast(out_channel, dframe)
 
     def _heartbeat(self) -> None:
         n = self._server.client_count

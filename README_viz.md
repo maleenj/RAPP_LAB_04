@@ -21,7 +21,7 @@ This is the master guide. Component-level docs:
 7. [Part E — Play recordings back](#part-e--play-recordings-back)
 8. [Part F — Student setup & Workshop Day-1](#part-f--student-setup--workshop-day-1)
 9. [Part G — Add a new data source](#part-g--add-a-new-data-source)
-10. [Part H — Neural-net activations (Phase 2, opt-in)](#part-h--neural-net-activations-phase-2-opt-in)
+10. [Part H — Neural-net activations: the "brain scan" (Phase 2)](#part-h--neural-net-activations-the-brain-scan-phase-2)
 11. [Troubleshooting](#troubleshooting)
 12. [File map](#file-map)
 
@@ -152,15 +152,32 @@ workshop WiFi — both receive identical data simultaneously.
 
 ## Part C — Connect Unity / Unreal
 
-Full Unity walkthrough: `viz_student_pack/unity/README.md`. In brief:
+Full Unity walkthrough: `viz_student_pack/unity/README.md`. The Unity pack is
+designed so students **focus on visuals, not plumbing** — no JSON package needed
+(a tiny parser is bundled).
 
-**Unity** — install **NativeWebSocket** (Package Manager → Add from git URL:
-`https://github.com/endel/NativeWebSocket.git#upm`), add the three scripts from
-`viz_student_pack/unity/`, set `VamClient.Url = ws://<host-ip>:8765`, press Play.
+**Unity — fastest test (the inspector):**
+1. Install **NativeWebSocket** (Package Manager → Add from git URL:
+   `https://github.com/endel/NativeWebSocket.git#upm`).
+2. Drag the `viz_student_pack/unity/` folder into `Assets/`.
+3. Empty GameObject → **Add Component → VamClient** (set `Url = ws://<host-ip>:8765`)
+   → **Add Component → VamInspector** → press **Play**.
+4. An overlay lists **every** channel: joints as bars, attention/activation
+   channels as colored heatmap grids. Instant "is it working + what's in here".
+
+**Unity — students build their own visual:** add a **`VamData`** component, pick a
+`channel`, then duplicate **`VamVisualizerTemplate.cs`** and fill in the marked
+block. Reading data is 1–2 lines:
+```csharp
+VamData data = GetComponent<VamData>();
+float[] joints = data.Values;                 // flat channels
+VamTensor attn = data.Tensor("decoder_xattn");// activation matrices
+```
+Two ready examples to remix: `ExampleAttentionHeatmap` and `ExampleJointBars`.
 
 **Unreal** — built-in WebSockets module (add `"WebSockets"` + `"Json"` to your
-`.Build.cs`); connect to `ws://<host-ip>:8765` and parse the JSON `data` array.
-Snippet in `ros2_ws/src/vam_viz_bridge/README.md`.
+`.Build.cs`); connect to `ws://<host-ip>:8765` and parse the JSON `data` array /
+nested `tensors`. Snippet in `ros2_ws/src/vam_viz_bridge/README.md`.
 
 ---
 
@@ -295,21 +312,70 @@ ZED `ObjectsStamped`. A genuinely new type needs one serializer function in
 
 ---
 
-## Part H — Neural-net activations (Phase 2, opt-in)
+## Part H — Neural-net activations: the "brain scan" (Phase 2)
 
-Not enabled yet. When you want the model's internal layers streamed, launch
-inference with one extra arg (works on the **real robot** and **headless**):
+Stream the model's internal "thinking" for live visualization and explainability.
+This runs a **separate** inference node (`vam_tm12s_node_viz`) — your original
+`vam_tm12s_node` / `vam_tm12s_robot.launch.py` are **never modified**.
+
+### Run it — real robot
+Same params as your normal command, just the `_viz` launch:
 ```bash
-ros2 launch vam_inference vam_tm12s_robot.launch.py \
+ros2 launch vam_inference vam_tm12s_robot_viz.launch.py \
     feedback_gain:=25.0 feedback_max_vel:=50.0 \
     max_joint_velocity_rad_s:=400.0 max_joint_acceleration_rad_s2:=400.0 \
     control_rate_hz:=100. \
-    publish_activations:=true
+    publish_saliency:=true        # optional perceptual scan (off by default)
 ```
-Then uncomment the `activations` channel in `bridge_channels.yaml` and restart
-the bridge. Recordings made afterward include the activations automatically (no
-format change). With the arg omitted, the inference pipeline is byte-for-byte
-unchanged. Details in `ros2_ws/src/vam_viz_bridge/README.md`.
+
+### Run it — headless / RViz replay (no robot, Mode 1)
+Test the activation stream from a rosbag on a ghost robot — no hardware needed:
+```bash
+# Terminal 1 (rapp_vam): play rosbag with clock
+ros2 bag play /data/rosbags/<name> --clock
+
+# Terminal 2 (rapp_vam): inference (headless) WITH activations
+ros2 launch vam_inference vam_tm12s_headless_viz.launch.py use_sim_time:=true
+#   add publish_saliency:=true for the perceptual scan
+
+# Terminal 3 (rapp_hw): RViz with the TM12S config (ghost robot)
+rviz2 -d /data/processed/vam_tm12s.rviz
+```
+This is the drop-in viz equivalent of `vam_tm12s_headless.launch.py` (which stays
+unchanged). It runs the model on the rosbag's skeleton, so `/vam/activations`
+carries **real attention** — ideal for testing the Unity attention visuals
+without the robot. (Needs a model from the registry; for joints-only replay with
+no model, use the recorded-`.jsonl` player instead.)
+
+In both cases the `activations` channel and the `derived:` block are already
+enabled in `bridge_channels.yaml`, so once the viz node runs the bridge streams
+everything. If you rebuilt the bridge earlier, it already has `numpy` for the
+derived metrics.
+
+### What you get (channels)
+**Raw (published by the viz node):**
+| Channel sub-tensor | Shape | Meaning |
+|---|---|---|
+| `decoder_xattn` | `[2,4,10,10]` | which input frames drove each predicted action (explainability anchor) |
+| `encoder_selfattn` | `[3,4,10,10]` | how the model integrates the recent motion across time |
+| `encoder_out` | `[10,128]` | latent "situation" state (pulsing heatmap) |
+| `decoder_out` | `[10,128]` | motor-plan latent |
+| `input_saliency` | `[10, K]` | *(saliency on)* which human keypoints, when, drove the action |
+
+**Derived (computed in the `rapp_viz` docker, not the robot):**
+| Channel | Meaning |
+|---|---|
+| `attn_entropy` | per-layer attention entropy — focused vs diffuse |
+| `activation_energy` | per-timestep latent L2 norm — "activity meter" |
+
+Choose which raw signals with `--ros-args -p activation_set:='[decoder_xattn, encoder_out]'`.
+
+### Notes
+- **Robot behavior is unchanged:** capturing attention shifts predictions by ~1e-6 rad (≈6e-5°), verified negligible. Saliency runs as a separate forward off the control path and is **off by default**.
+- **Recordings include all of it** automatically (the recorder captures the bridge's output — raw *and* derived channels). Raw tensors are recorded too, so new explainability metrics can be recomputed offline later.
+- **Add a new derived metric** = one function in `ros2_ws/src/vam_viz_bridge/vam_viz_bridge/transforms.py` + one `derived:` entry in `bridge_channels.yaml`, then restart only `rapp_viz`. The robot pipeline is never touched.
+
+Details in `ros2_ws/src/vam_viz_bridge/README.md`.
 
 ---
 
@@ -358,7 +424,14 @@ viz_student_pack/
 ├── player.py                            # offline replay server (no ROS)
 ├── recordings/{r1g1,r2g1}.jsonl         # sample datasets
 ├── web/index.html                       # browser viewer + connection test
-└── unity/{VamClient,JointVisualizer,ConnectionStatusUI}.cs + README.md
+└── unity/                                # VamClient + VamData + VamInspector
+    ├── VamClient.cs  VamData.cs           #   connection + per-object data input
+    ├── VamJson.cs    VamFrame.cs          #   bundled parser + data model
+    ├── VamInspector.cs                    #   default overlay (every channel)
+    ├── VamVisualizerTemplate.cs           #   copy-me starter for new visuals
+    ├── ExampleAttentionHeatmap.cs  ExampleJointBars.cs  JointVisualizer.cs
+    ├── ConnectionStatusUI.cs
+    └── README.md
 ```
 
 **Edited later for Phase 2 only (gated, default-off):**

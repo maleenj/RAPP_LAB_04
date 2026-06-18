@@ -236,27 +236,35 @@ The full student-facing bundle (player, sample recordings, browser viewer, Unity
 scripts + guide) lives in [`viz_student_pack/`](../../../viz_student_pack/). See
 its `README.md` for the Windows/Mac day-1 runbook.
 
-## Phase 2 — neural-network activations (opt-in)
+## Phase 2 — neural-network activations (the "brain scan")
 
-Off by default. To stream internal activations, launch the inference node with
-`publish_activations:=true` — works on the **real robot** and **headless**:
+Streamed by a **separate** inference node, `vam_tm12s_node_viz` — the original
+`vam_tm12s_node` is never modified. Run the viz launch (same params as the
+original robot launch):
 
 ```bash
-# Real robot (your normal command + one arg):
-ros2 launch vam_inference vam_tm12s_robot.launch.py \
+ros2 launch vam_inference vam_tm12s_robot_viz.launch.py \
     feedback_gain:=25.0 feedback_max_vel:=50.0 \
     max_joint_velocity_rad_s:=400.0 max_joint_acceleration_rad_s2:=400.0 \
     control_rate_hz:=100. \
-    publish_activations:=true
-
-# Headless:
-ros2 launch vam_inference vam_tm12s_headless.launch.py publish_activations:=true
+    publish_saliency:=true        # optional; off by default
 ```
 
-Choose which activations with `activation_set:='[encoder_out, encoder_selfattn]'`.
-Then uncomment the `activations` channel in `config/bridge_channels.yaml` and
-restart the bridge. With the arg omitted, the inference pipeline is byte-for-byte
-unchanged.
+The `activations` channel and the `derived:` block are already enabled in
+`config/bridge_channels.yaml`. Channels produced:
+
+- **Raw (viz node):** `activations` carrying `decoder_xattn [2,4,10,10]`,
+  `encoder_selfattn [3,4,10,10]`, `encoder_out [10,128]`, `decoder_out [10,128]`,
+  and (saliency on) `input_saliency [10,K]`.
+- **Derived (computed here in the bridge):** `attn_entropy` (per-layer attention
+  entropy) and `activation_energy` (per-timestep latent L2 norm).
+
+Choose raw signals with `--ros-args -p activation_set:='[decoder_xattn, encoder_out]'`.
+Capturing attention shifts predictions by ~1e-6 rad (negligible, verified);
+saliency runs off the control path and is off by default. **Add a derived metric**
+= one function in `transforms.py` + one `derived:` entry, then restart only the
+bridge — the robot is never touched. The viz image needs `numpy` (already in
+`docker/viz/Dockerfile`).
 
 ---
 
@@ -280,6 +288,7 @@ vam_viz_bridge/
 ├── vam_viz_bridge/
 │   ├── viz_bridge_node.py          # config-driven subs + WebSocket fan-out
 │   ├── serializers.py              # ROS msg -> uniform dict (add new types here)
+│   ├── transforms.py               # derived metrics (entropy, norms) — add here
 │   ├── websocket_server.py         # asyncio broadcast server (latest-frame-wins)
 │   └── test_client.py              # CLI verification client
 └── web/index.html                  # browser test page + reference client

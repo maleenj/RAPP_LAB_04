@@ -1,17 +1,22 @@
-// VamClient.cs — receive the VAM data stream in Unity.
+// VamClient.cs — the shared connection to the VAM data stream.
+//
+// You usually add ONE VamClient to your scene. Everything else (VamData,
+// VamInspector, your visuals) finds it automatically via VamClient.Instance and
+// shares this single connection. It parses EVERY channel — flat vectors AND
+// nested tensors (attention matrices) — into a uniform VamFrame.
 //
 // Two data sources, ONE code path:
-//   * Live / replay  : connect to ws://<host-ip>:8765 (the live bridge or player.py)
-//   * Offline file   : play back a recorded .jsonl TextAsset, no server/network
+//   * Live / replay : connect to ws://<host-ip>:8765 (the live bridge or player.py)
+//   * Offline file  : play back a recorded .jsonl TextAsset, no server/network
 //
-// Other scripts subscribe to OnFrame to get every frame, or poll LatestByChannel.
-//
-// Requires the free NativeWebSocket package for the WebSocket mode:
+// Live mode needs the free NativeWebSocket package:
 //   Window > Package Manager > + > Add package from git URL:
 //   https://github.com/endel/NativeWebSocket.git#upm
-// (File-playback mode works WITHOUT NativeWebSocket — see USE_NATIVE_WEBSOCKET.)
+// File-playback works WITHOUT it (comment out USE_NATIVE_WEBSOCKET below).
+//
+// No JSON package needed — VamJson.cs (bundled) handles parsing.
 
-#define USE_NATIVE_WEBSOCKET   // comment this line out if you only do file playback
+#define USE_NATIVE_WEBSOCKET   // comment out if you only do offline file playback
 
 using System;
 using System.Collections.Generic;
@@ -22,6 +27,9 @@ using NativeWebSocket;
 
 public class VamClient : MonoBehaviour
 {
+    /// Shared instance — other scripts use VamClient.Instance, no wiring needed.
+    public static VamClient Instance { get; private set; }
+
     public enum Source { WebSocket, FilePlayback }
 
     [Header("Where the data comes from")]
@@ -41,23 +49,11 @@ public class VamClient : MonoBehaviour
     public bool IsConnected;
     public float Hz;
 
-    // One uniform frame shape for every channel. Extra keys (t_recv, velocity,
-    // tensors) are simply ignored by JsonUtility — the joints test only needs these.
-    [Serializable]
-    public class Frame
-    {
-        public string channel;
-        public double stamp;
-        public int[] shape;
-        public float[] data;
-        public string[] labels;
-    }
-
     /// Fired for every received frame (main thread).
-    public event Action<Frame> OnFrame;
+    public event Action<VamFrame> OnFrame;
 
     /// Latest frame per channel, for pollers.
-    public readonly Dictionary<string, Frame> LatestByChannel = new Dictionary<string, Frame>();
+    public readonly Dictionary<string, VamFrame> LatestByChannel = new Dictionary<string, VamFrame>();
 
     int _frameCount;
     float _rateTimer;
@@ -65,6 +61,12 @@ public class VamClient : MonoBehaviour
 #if USE_NATIVE_WEBSOCKET
     WebSocket _ws;
 #endif
+
+    void Awake()
+    {
+        if (Instance == null) Instance = this;
+        else if (Instance != this) Debug.LogWarning("[VamClient] more than one VamClient in the scene.");
+    }
 
     async void Start()
     {
@@ -93,7 +95,6 @@ public class VamClient : MonoBehaviour
             #endif
         }
 #endif
-        // frame-rate estimate
         _rateTimer += Time.deltaTime;
         if (_rateTimer >= 1f)
         {
@@ -103,17 +104,41 @@ public class VamClient : MonoBehaviour
         }
     }
 
+    // ---- parsing (handles flat AND tensor channels) ----------------------- //
     void Dispatch(string json)
     {
-        Frame frame;
-        try { frame = JsonUtility.FromJson<Frame>(json); }
-        catch { return; }
-        if (frame == null || string.IsNullOrEmpty(frame.channel)) return;
-        if (frame.channel == "__status__") { IsConnected = true; return; }
+        VamJson root = VamJson.Parse(json);
+        if (root.IsNull) return;
+        string channel = root["channel"].AsString;
+        if (string.IsNullOrEmpty(channel)) return;
+        if (channel == "__status__") { IsConnected = true; return; }
+
+        var frame = new VamFrame { channel = channel, stamp = root["stamp"].AsDouble };
+
+        if (root.Has("tensors"))
+        {
+            var node = root["tensors"];
+            frame.tensors = new Dictionary<string, VamTensor>();
+            foreach (var name in node.Keys)
+            {
+                var t = node[name];
+                frame.tensors[name] = new VamTensor
+                {
+                    shape = t["shape"].AsIntArray(),
+                    data = t["data"].AsFloatArray(),
+                };
+            }
+        }
+        if (root.Has("data"))
+        {
+            frame.data = root["data"].AsFloatArray();
+            frame.shape = root["shape"].AsIntArray();
+            frame.labels = root["labels"].AsStringArray();
+        }
 
         IsConnected = true;
         _frameCount++;
-        LatestByChannel[frame.channel] = frame;
+        LatestByChannel[channel] = frame;
         OnFrame?.Invoke(frame);
     }
 
@@ -154,7 +179,6 @@ public class VamClient : MonoBehaviour
                 var line = raw.Trim();
                 if (line.Length == 0) continue;
 
-                // pull t_recv for pacing (JsonUtility Frame doesn't include it)
                 double t = ExtractTRecv(line);
                 if (!double.IsNaN(prev) && !double.IsNaN(t))
                 {
@@ -175,7 +199,7 @@ public class VamClient : MonoBehaviour
         Debug.Log("[VamClient] file playback finished");
     }
 
-    // Lightweight numeric extraction so we don't need a JSON lib just for one field.
+    // Lightweight numeric extraction for replay pacing.
     static double ExtractTRecv(string line)
     {
         const string key = "\"t_recv\":";

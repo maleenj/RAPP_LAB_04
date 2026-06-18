@@ -19,7 +19,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN pip3 install --no-cache-dir \
         "setuptools==58.2.0" \
         "websockets>=12.0" \
-        "pyyaml"
+        "pyyaml" \
+        "numpy"
 
 WORKDIR /ws
 COPY entrypoint.sh /entrypoint_viz.sh

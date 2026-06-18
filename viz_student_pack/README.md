@@ -48,7 +48,10 @@ opening Unity. If it works here but not in Unity, the problem is in Unity, not
 the network.
 
 ### 2. Unity — live (connect to the robot / the instructor's server)
-Follow `unity/README.md`. In short: new 3D project → install NativeWebSocket →
+Follow `unity/README.md`. The Unity pack does the data plumbing for you: add a
+**VamInspector** to see every channel instantly, then add a **VamData** component
+(pick a channel) + copy **VamVisualizerTemplate** and write only your visual.
+No JSON package needed. In short: new 3D project → install NativeWebSocket →
 add the three scripts → set `VamClient.Url` to the instructor's address → Play.
 Six cubes rotate with the live motion.
 
