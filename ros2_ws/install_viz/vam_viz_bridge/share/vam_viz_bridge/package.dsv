@@ -1,0 +1,9 @@
+source;share/vam_viz_bridge/hook/pythonpath.ps1
+source;share/vam_viz_bridge/hook/pythonpath.dsv
+source;share/vam_viz_bridge/hook/pythonpath.sh
+source;share/vam_viz_bridge/hook/ament_prefix_path.ps1
+source;share/vam_viz_bridge/hook/ament_prefix_path.dsv
+source;share/vam_viz_bridge/hook/ament_prefix_path.sh
+source;../../build_viz/vam_viz_bridge/share/vam_viz_bridge/hook/pythonpath_develop.ps1
+source;../../build_viz/vam_viz_bridge/share/vam_viz_bridge/hook/pythonpath_develop.dsv
+source;../../build_viz/vam_viz_bridge/share/vam_viz_bridge/hook/pythonpath_develop.sh

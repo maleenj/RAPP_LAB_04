@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<!--
+  VAM stream viewer / connection test — works on any OS, no install.
+
+  Day-1 use: open this file (double-click), type the host's address
+  (ws://<host-ip>:8765), click Connect. If the banner turns green you are on the
+  network and receiving data. Joint channels render as bars; 2-D tensors (later,
+  the NN attention maps) render as a heatmap.
+
+  Works against the live bridge OR the standalone player.py — same protocol.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>VAM stream viewer</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 1.5rem; background:#111; color:#eee; }
+    h1 { font-size: 1.15rem; }
+    #banner { padding:.5rem .8rem; border-radius:.5rem; font-weight:600; display:inline-block; }
+    .ok { background:#1a5; } .bad { background:#a33; } .wait { background:#a72; }
+    input { font-size:1rem; padding:.35rem; width:20rem; background:#222; color:#eee; border:1px solid #444; border-radius:.3rem;}
+    button { font-size:1rem; padding:.35rem .9rem; border-radius:.3rem; cursor:pointer; }
+    .channel { margin:1rem 0; padding:.6rem .8rem; background:#1b1b1b; border-radius:.5rem; }
+    .channel h2 { font-size:.95rem; margin:.2rem 0; color:#9cf; }
+    .bar { height:14px; background:#3a7; margin:2px 0; border-radius:2px; min-width:2px; }
+    .label { font-size:.75rem; color:#aaa; }
+    canvas { background:#000; border:1px solid #333; image-rendering: pixelated; }
+  </style>
+</head>
+<body>
+  <h1>VAM stream viewer &amp; connection test</h1>
+  <p>
+    <input id="url" value="ws://localhost:8765" />
+    <button id="connect">Connect</button>
+    &nbsp; <span id="banner" class="bad">disconnected</span>
+  </p>
+  <p class="label">Tip: replace <code>localhost</code> with the host IP the instructor gives you, e.g. <code>ws://192.168.1.50:8765</code></p>
+  <div id="channels"></div>
+
+<script>
+const channelsEl = document.getElementById('channels');
+const banner = document.getElementById('banner');
+const panels = {};
+const rate = {};
+let ws = null;
+
+function setBanner(text, cls) { banner.textContent = text; banner.className = cls; }
+
+function panelFor(channel) {
+  if (panels[channel]) return panels[channel];
+  const div = document.createElement('div');
+  div.className = 'channel';
+  div.innerHTML = `<h2>${channel} <span class="label" id="hz-${channel}"></span></h2>
+                   <div id="body-${channel}"></div>`;
+  channelsEl.appendChild(div);
+  panels[channel] = div;
+  rate[channel] = { count: 0, last: performance.now() };
+  return div;
+}
+
+function tickRate(channel) {
+  const r = rate[channel]; r.count++;
+  const now = performance.now();
+  if (now - r.last > 1000) {
+    const hz = (r.count * 1000) / (now - r.last);
+    r.count = 0; r.last = now;
+    const el = document.getElementById(`hz-${channel}`);
+    if (el) el.textContent = `${hz.toFixed(1)} Hz`;
+  }
+}
+
+function renderVector(channel, shape, data, labels) {
+  panelFor(channel);
+  const body = document.getElementById(`body-${channel}`);
+  const maxAbs = Math.max(1e-6, ...data.map(Math.abs));
+  body.innerHTML = data.map((v, i) => {
+    const w = (Math.abs(v) / maxAbs) * 100;
+    const name = (labels && labels[i]) ? labels[i] : `[${i}]`;
+    return `<div class="label">${name}: ${v.toFixed(4)}</div>
+            <div class="bar" style="width:${w}%"></div>`;
+  }).join('');
+}
+
+function renderHeatmap(channel, name, shape, data) {
+  panelFor(channel);
+  const body = document.getElementById(`body-${channel}`);
+  const id = `${channel}-${name}`;
+  let canvas = document.getElementById(`cv-${id}`);
+  const cols = shape[shape.length - 1];
+  const rows = shape.length >= 2 ? shape[shape.length - 2] : 1;
+  const planes = data.length / (rows * cols);
+  if (!canvas) {
+    const wrap = document.createElement('div');
+    wrap.innerHTML = `<div class="label">${name} ${JSON.stringify(shape)}</div>`;
+    canvas = document.createElement('canvas');
+    canvas.id = `cv-${id}`; canvas.width = cols; canvas.height = rows;
+    canvas.style.width = (cols * 18) + 'px'; canvas.style.height = (rows * 18) + 'px';
+    wrap.appendChild(canvas); body.appendChild(wrap);
+  }
+  const ctx = canvas.getContext('2d');
+  const img = ctx.createImageData(cols, rows);
+  const cell = new Float32Array(rows * cols);
+  for (let p = 0; p < planes; p++)
+    for (let k = 0; k < rows * cols; k++)
+      cell[k] += data[p * rows * cols + k] / planes;
+  const max = Math.max(1e-6, ...cell);
+  for (let k = 0; k < rows * cols; k++) {
+    const t = cell[k] / max;
+    img.data[k*4+0] = Math.floor(255 * t);
+    img.data[k*4+1] = Math.floor(80 * t);
+    img.data[k*4+2] = Math.floor(255 * (1 - t));
+    img.data[k*4+3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+function handleFrame(frame) {
+  const channel = frame.channel || '?';
+  if (channel === '__status__') { setBanner('connected — waiting for data…', 'wait'); return; }
+  setBanner('connected — receiving data', 'ok');
+  tickRate(channel);
+  if (frame.tensors) {
+    for (const [name, t] of Object.entries(frame.tensors)) {
+      if (t.shape.length >= 2) renderHeatmap(channel, name, t.shape, t.data);
+      else renderVector(channel + ':' + name, t.shape, t.data);
+    }
+  } else if (frame.shape && frame.shape.length >= 2) {
+    renderHeatmap(channel, 'map', frame.shape, frame.data);
+  } else if (frame.data) {
+    renderVector(channel, frame.shape, frame.data, frame.labels);
+  }
+}
+
+function connect() {
+  const url = document.getElementById('url').value;
+  if (ws) ws.close();
+  setBanner('connecting…', 'wait');
+  ws = new WebSocket(url);
+  ws.onopen = () => setBanner('connected — waiting for data…', 'wait');
+  ws.onclose = () => setBanner('disconnected', 'bad');
+  ws.onerror = () => setBanner('error — check the address / WiFi / firewall', 'bad');
+  ws.onmessage = (e) => { try { handleFrame(JSON.parse(e.data)); } catch (_) {} };
+}
+
+document.getElementById('connect').onclick = connect;
+</script>
+</body>
+</html>

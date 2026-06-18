@@ -18,6 +18,9 @@ if [ -d "/ws/ros2_ws/src/vam_viz_bridge" ]; then
         --packages-select vam_viz_bridge \
         --build-base build_viz --install-base install_viz 2>&1 | tail -5
     source /ws/ros2_ws/install_viz/setup.bash
+    # Make interactive `docker exec ... bash` sessions auto-source the overlay too.
+    grep -q "install_viz/setup.bash" /root/.bashrc 2>/dev/null || \
+        echo "source /ws/ros2_ws/install_viz/setup.bash 2>/dev/null" >> /root/.bashrc
     echo "vam_viz_bridge built and sourced."
     cd /ws
 else

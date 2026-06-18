@@ -11,7 +11,7 @@
     <xacro:tm12s_ros2_control name="FakeSystem" initial_positions_file="$(arg initial_positions_file)"/>
 
     <!-- ==================== PEDESTAL POLE ==================== -->
-    <!-- 580mm tall central pole supporting the robot; 150mm diameter -->
+    <!-- 580mm tall central base supporting the robot; 450mm x 450mm square top -->
     <!-- Extends downward from the robot base (base link is at top of pole) -->
     <joint name="pole_joint" type="fixed">
         <parent link="base"/>
@@ -22,7 +22,7 @@
     <link name="pole_link">
         <visual>
             <geometry>
-                <cylinder length="0.58" radius="0.075"/>
+                <box size="0.45 0.45 0.58"/>
             </geometry>
             <material name="pole_gray">
                 <color rgba="0.3 0.3 0.3 1.0"/>
@@ -30,7 +30,7 @@
         </visual>
         <collision>
             <geometry>
-                <cylinder length="0.58" radius="0.075"/>
+                <box size="0.45 0.45 0.58"/>
             </geometry>
         </collision>
         <inertial>

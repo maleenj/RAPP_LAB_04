@@ -213,6 +213,29 @@ Supported serializers out of the box: `joint_state`, `multiarray`,
 
 ---
 
+## Recording datasets for offline use (students / no robot)
+
+Capture the live stream into a small, portable `.jsonl` that anyone can replay
+without ROS or the robot — ideal for handing students offline data to build
+against:
+
+```bash
+# with a bridge running (e.g. while a rosbag plays through it)
+python3 tools/record_stream.py ws://localhost:8765 --out rec.jsonl --duration 60
+```
+
+Replay it anywhere with the standalone, cross-platform player (only needs
+`pip install websockets`, no ROS) — clients connect exactly as if it were live:
+
+```bash
+python3 ../../../viz_student_pack/player.py rec.jsonl --loop
+# -> ws://localhost:8765
+```
+
+The full student-facing bundle (player, sample recordings, browser viewer, Unity
+scripts + guide) lives in [`viz_student_pack/`](../../../viz_student_pack/). See
+its `README.md` for the Windows/Mac day-1 runbook.
+
 ## Phase 2 — neural-network activations (opt-in)
 
 Off by default. To stream internal activations, launch the inference node with

@@ -89,6 +89,13 @@ class WebSocketBroadcastServer:
         self._clients.add(client)
         peer = getattr(connection, "remote_address", ("?", 0))
         self._log_info(f"client connected: {peer} (total={len(self._clients)})")
+        # Immediately confirm reachability so a freshly-connected client knows it
+        # is wired up even before any data frame arrives (useful on workshop day 1).
+        try:
+            hello = {"channel": "__status__", "msg": "connected", "server": "vam_viz_bridge"}
+            await connection.send(json.dumps(hello, separators=(",", ":")))
+        except Exception:
+            pass
         try:
             while True:
                 await client.event.wait()
