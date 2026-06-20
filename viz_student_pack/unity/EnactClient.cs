@@ -1,9 +1,9 @@
-// VamClient.cs — the shared connection to the VAM data stream.
+// EnactClient.cs — the shared connection to the ENACT data stream.
 //
-// You usually add ONE VamClient to your scene. Everything else (VamData,
-// VamInspector, your visuals) finds it automatically via VamClient.Instance and
+// You usually add ONE EnactClient to your scene. Everything else (EnactData,
+// EnactInspector, your visuals) finds it automatically via EnactClient.Instance and
 // shares this single connection. It parses EVERY channel — flat vectors AND
-// nested tensors (attention matrices) — into a uniform VamFrame.
+// nested tensors (attention matrices) — into a uniform EnactFrame.
 //
 // Two data sources, ONE code path:
 //   * Live / replay : connect to ws://<host-ip>:8765 (the live bridge or player.py)
@@ -14,7 +14,7 @@
 //   https://github.com/endel/NativeWebSocket.git#upm
 // File-playback works WITHOUT it (comment out USE_NATIVE_WEBSOCKET below).
 //
-// No JSON package needed — VamJson.cs (bundled) handles parsing.
+// No JSON package needed — EnactJson.cs (bundled) handles parsing.
 
 #define USE_NATIVE_WEBSOCKET   // comment out if you only do offline file playback
 
@@ -25,10 +25,10 @@ using UnityEngine;
 using NativeWebSocket;
 #endif
 
-public class VamClient : MonoBehaviour
+public class EnactClient : MonoBehaviour
 {
-    /// Shared instance — other scripts use VamClient.Instance, no wiring needed.
-    public static VamClient Instance { get; private set; }
+    /// Shared instance — other scripts use EnactClient.Instance, no wiring needed.
+    public static EnactClient Instance { get; private set; }
 
     public enum Source { WebSocket, FilePlayback }
 
@@ -50,10 +50,10 @@ public class VamClient : MonoBehaviour
     public float Hz;
 
     /// Fired for every received frame (main thread).
-    public event Action<VamFrame> OnFrame;
+    public event Action<EnactFrame> OnFrame;
 
     /// Latest frame per channel, for pollers.
-    public readonly Dictionary<string, VamFrame> LatestByChannel = new Dictionary<string, VamFrame>();
+    public readonly Dictionary<string, EnactFrame> LatestByChannel = new Dictionary<string, EnactFrame>();
 
     int _frameCount;
     float _rateTimer;
@@ -65,7 +65,7 @@ public class VamClient : MonoBehaviour
     void Awake()
     {
         if (Instance == null) Instance = this;
-        else if (Instance != this) Debug.LogWarning("[VamClient] more than one VamClient in the scene.");
+        else if (Instance != this) Debug.LogWarning("[EnactClient] more than one EnactClient in the scene.");
     }
 
     async void Start()
@@ -107,22 +107,22 @@ public class VamClient : MonoBehaviour
     // ---- parsing (handles flat AND tensor channels) ----------------------- //
     void Dispatch(string json)
     {
-        VamJson root = VamJson.Parse(json);
+        EnactJson root = EnactJson.Parse(json);
         if (root.IsNull) return;
         string channel = root["channel"].AsString;
         if (string.IsNullOrEmpty(channel)) return;
         if (channel == "__status__") { IsConnected = true; return; }
 
-        var frame = new VamFrame { channel = channel, stamp = root["stamp"].AsDouble };
+        var frame = new EnactFrame { channel = channel, stamp = root["stamp"].AsDouble };
 
         if (root.Has("tensors"))
         {
             var node = root["tensors"];
-            frame.tensors = new Dictionary<string, VamTensor>();
+            frame.tensors = new Dictionary<string, EnactTensor>();
             foreach (var name in node.Keys)
             {
                 var t = node[name];
-                frame.tensors[name] = new VamTensor
+                frame.tensors[name] = new EnactTensor
                 {
                     shape = t["shape"].AsIntArray(),
                     data = t["data"].AsFloatArray(),
@@ -147,9 +147,9 @@ public class VamClient : MonoBehaviour
     async System.Threading.Tasks.Task ConnectWebSocket()
     {
         _ws = new WebSocket(url);
-        _ws.OnOpen += () => { IsConnected = true; Debug.Log($"[VamClient] connected: {url}"); };
-        _ws.OnError += (e) => Debug.LogWarning($"[VamClient] error: {e}");
-        _ws.OnClose += (c) => { IsConnected = false; Debug.Log("[VamClient] closed"); };
+        _ws.OnOpen += () => { IsConnected = true; Debug.Log($"[EnactClient] connected: {url}"); };
+        _ws.OnError += (e) => Debug.LogWarning($"[EnactClient] error: {e}");
+        _ws.OnClose += (c) => { IsConnected = false; Debug.Log("[EnactClient] closed"); };
         _ws.OnMessage += (bytes) => Dispatch(System.Text.Encoding.UTF8.GetString(bytes));
         await _ws.Connect();
     }
@@ -165,7 +165,7 @@ public class VamClient : MonoBehaviour
     {
         if (recording == null)
         {
-            Debug.LogError("[VamClient] FilePlayback selected but no recording assigned.");
+            Debug.LogError("[EnactClient] FilePlayback selected but no recording assigned.");
             yield break;
         }
         var lines = recording.text.Split('\n');
@@ -196,7 +196,7 @@ public class VamClient : MonoBehaviour
             yield return new WaitForSeconds(0.2f);
         } while (loop);
 
-        Debug.Log("[VamClient] file playback finished");
+        Debug.Log("[EnactClient] file playback finished");
     }
 
     // Lightweight numeric extraction for replay pacing.

@@ -25,6 +25,7 @@ setup(
             'vam_inference_node = vam_inference.vam_node:main',
             'vam_tm12s_node = vam_inference.vam_tm12s_node:main',
             'vam_tm12s_node_viz = vam_inference.vam_tm12s_node_viz:main',
+            'skeleton_relay = vam_inference.skeleton_relay:main',
             'servo_to_tm_vjog_bridge = vam_inference.servo_to_tm_vjog_bridge:main',
             'servo_to_tm_pvt_bridge = vam_inference.servo_to_tm_pvt_bridge:main',
             'servo_to_tm_ptp_bridge = vam_inference.servo_to_tm_ptp_bridge:main',

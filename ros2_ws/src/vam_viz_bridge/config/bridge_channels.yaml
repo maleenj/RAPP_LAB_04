@@ -19,17 +19,11 @@ server:
     port: 8765
 
 channels:
-  # Predicted "ghost" joints from the VAM (what the model wants the robot to do).
-  - topic: "/vam/joint_states"
-    type: "sensor_msgs/msg/JointState"
-    channel: "joint_states"
-
-  # Normalized joint targets stream sent to the PVT streamer.
-  - topic: "/vam/joint_targets"
-    type: "std_msgs/msg/Float64MultiArray"
-    channel: "joint_targets"
-
-  # Real robot joints (actual measured positions).
+  # The robot's ACTUAL measured joint positions — what the arm is physically
+  # doing. This is the one joint channel to drive visuals synced to the robot.
+  # (The VAM's predicted /vam/joint_states and commanded /vam/joint_targets are
+  # intentionally NOT streamed — they aren't the physical state. Those ROS topics
+  # still exist for the robot pipeline; we just don't fan them out to clients.)
   - topic: "/joint_states"
     type: "sensor_msgs/msg/JointState"
     channel: "robot_joint_states"
@@ -42,12 +36,13 @@ channels:
     channel: "activations"
     serializer: "multiarray_named"
 
-  # --- Example: stream the raw ZED skeleton too (needs zed_msgs in the image) ---
-  # - topic: "/zed/zed_node/body_trk/skeletons"
-  #   type: "zed_msgs/msg/ObjectsStamped"
-  #   channel: "skeleton"
-  #   serializer: "zed_skeleton"
-  #   qos: "sensor"
+  # --- Human skeleton keypoints [K,3] ---
+  # Fed by `ros2 run vam_inference skeleton_relay` (which converts the ZED
+  # ObjectsStamped into this generic Float32MultiArray, so the lightweight bridge
+  # needs no zed_msgs). Run the relay in a container that has zed_msgs (rapp_vam).
+  - topic: "/vam/skeleton"
+    type: "std_msgs/msg/Float32MultiArray"
+    channel: "skeleton"
 
 # Derived explainability metrics — computed in THIS (viz) container from the raw
 # activations, then broadcast as their own channels. Add/tweak freely and restart

@@ -2,7 +2,7 @@
 //
 // The simplest possible "it works" visual: each incoming joint angle rotates one
 // cube. Assign 6 cube Transforms (or leave empty to auto-spawn them). Point the
-// `client` field at your VamClient and pick which channel to read.
+// `client` field at your EnactClient and pick which channel to read.
 //
 // This is a starting point — replace the cubes with your own rig / robot model
 // and map `data[i]` however you like. The data is joint angles in RADIANS.
@@ -11,11 +11,10 @@ using UnityEngine;
 
 public class JointVisualizer : MonoBehaviour
 {
-    [Tooltip("The VamClient providing frames.")]
-    public VamClient client;
+    [Tooltip("The EnactClient providing frames.")]
+    public EnactClient client;
 
-    [Tooltip("Which channel to visualize: joint_states (VAM ghost), " +
-             "robot_joint_states (real robot), or joint_targets.")]
+    [Tooltip("Which joint channel to visualize (the robot's actual joints).")]
     public string channel = "robot_joint_states";
 
     [Tooltip("Cubes to rotate. Leave empty to auto-create a row of 6.")]
@@ -36,7 +35,7 @@ public class JointVisualizer : MonoBehaviour
     {
         if (joints == null || joints.Length == 0) AutoSpawn(6);
         _current = new float[joints.Length];
-        if (client == null) client = FindObjectOfType<VamClient>();
+        if (client == null) client = FindObjectOfType<EnactClient>();
     }
 
     void AutoSpawn(int n)

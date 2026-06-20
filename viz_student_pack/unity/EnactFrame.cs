@@ -1,18 +1,18 @@
-// VamFrame.cs — the uniform data model every channel arrives as.
+// EnactFrame.cs — the uniform data model every channel arrives as.
 //
-// You rarely construct these yourself; VamClient builds them from the network and
-// hands them to you via VamData. You just READ the fields/helpers below.
+// You rarely construct these yourself; EnactClient builds them from the network and
+// hands them to you via EnactData. You just READ the fields/helpers below.
 //
 // Two shapes of channel:
 //   * Flat channels (joint_states, joint_targets, robot_joint_states):
 //       use `data` (float[]), `shape` (int[]), `labels` (string[]).
 //   * Tensor channels (activations, attn_entropy, activation_energy):
-//       use `tensors["name"]` -> VamTensor (e.g. "decoder_xattn", "encoder_out").
+//       use `tensors["name"]` -> EnactTensor (e.g. "decoder_xattn", "encoder_out").
 
 using System.Collections.Generic;
 
 /// One named numeric tensor (a sub-array of a tensor channel).
-public class VamTensor
+public class EnactTensor
 {
     public int[] shape;     // e.g. [2,4,10,10] or [10,128] or [10]
     public float[] data;    // flat, row-major
@@ -48,7 +48,7 @@ public class VamTensor
 }
 
 /// One message on one channel.
-public class VamFrame
+public class EnactFrame
 {
     public string channel;
     public double stamp;
@@ -59,7 +59,7 @@ public class VamFrame
     public string[] labels;   // optional per-element names (e.g. joint names)
 
     // Tensor-channel field:
-    public Dictionary<string, VamTensor> tensors;  // null for flat channels
+    public Dictionary<string, EnactTensor> tensors;  // null for flat channels
 
     public bool HasTensors => tensors != null && tensors.Count > 0;
     public bool IsMatrix => shape != null && shape.Length >= 2;
@@ -72,6 +72,6 @@ public class VamFrame
     public float Get(int row, int col) => Get(row * Cols + col);
 
     /// Convenience: a named tensor, or null if this channel/name has none.
-    public VamTensor Tensor(string name) =>
+    public EnactTensor Tensor(string name) =>
         (tensors != null && tensors.TryGetValue(name, out var t)) ? t : null;
 }

@@ -1,4 +1,4 @@
-# README_viz — Live Visualization Streaming (VAM → Unity/Unreal)
+# README_viz — Live Visualization Streaming (ENACT → Unity/Unreal)
 
 Everything for streaming the robot's live data (joint angles now; neural-net
 internals later) over WiFi to **Unity, Unreal, or a browser**, plus **recording**
@@ -31,10 +31,10 @@ This is the master guide. Component-level docs:
 
 ```
  existing ROS2 topics ─┐
-  /vam/joint_states     │   ┌──────────────────┐   ws://<host-ip>:8765   ┌── Unity laptop
-  /vam/joint_targets    ├──▶│  vam_viz_bridge  │──── JSON frames ────────┼── Unreal laptop
-  /joint_states         │   │ (rapp_viz docker)│   (broadcast)           ├── browser viewer
-  /vam/activations*     ┘   └──────────────────┘                         └── big screen
+  /joint_states         │   ┌──────────────────┐   ws://<host-ip>:8765   ┌── Unity laptop
+  /vam/skeleton         ├──▶│  vam_viz_bridge  │──── JSON frames ────────┼── Unreal laptop
+  /vam/activations*     │   │ (rapp_viz docker)│   (broadcast)           ├── browser viewer
+                        ┘   └──────────────────┘                         └── big screen
   (* Phase 2, opt-in)
 ```
 
@@ -160,18 +160,18 @@ designed so students **focus on visuals, not plumbing** — no JSON package need
 1. Install **NativeWebSocket** (Package Manager → Add from git URL:
    `https://github.com/endel/NativeWebSocket.git#upm`).
 2. Drag the `viz_student_pack/unity/` folder into `Assets/`.
-3. Empty GameObject → **Add Component → VamClient** (set `Url = ws://<host-ip>:8765`)
-   → **Add Component → VamInspector** → press **Play**.
+3. Empty GameObject → **Add Component → EnactClient** (set `Url = ws://<host-ip>:8765`)
+   → **Add Component → EnactInspector** → press **Play**.
 4. An overlay lists **every** channel: joints as bars, attention/activation
    channels as colored heatmap grids. Instant "is it working + what's in here".
 
-**Unity — students build their own visual:** add a **`VamData`** component, pick a
-`channel`, then duplicate **`VamVisualizerTemplate.cs`** and fill in the marked
+**Unity — students build their own visual:** add a **`EnactData`** component, pick a
+`channel`, then duplicate **`EnactVisualizerTemplate.cs`** and fill in the marked
 block. Reading data is 1–2 lines:
 ```csharp
-VamData data = GetComponent<VamData>();
+EnactData data = GetComponent<EnactData>();
 float[] joints = data.Values;                 // flat channels
-VamTensor attn = data.Tensor("decoder_xattn");// activation matrices
+EnactTensor attn = data.Tensor("decoder_xattn");// activation matrices
 ```
 Two ready examples to remix: `ExampleAttentionHeatmap` and `ExampleJointBars`.
 
@@ -194,7 +194,7 @@ rosbag playing its `/joint_states`, and the recorder.
 ```bash
 # 0) bridge running (Part A)
 
-# 1) play a rosbag's joints (in the VAM container, which has /data/rosbags)
+# 1) play a rosbag's joints (in the rapp_vam container, which has /data/rosbags)
 docker exec -it rapp_vam bash -lc '
   source /opt/ros/humble/setup.bash
   ros2 bag play /data/rosbags/26_04_08_RAPP_M_R1G1_01 --clock --topics /joint_states'
@@ -207,9 +207,9 @@ python3 ros2_ws/src/vam_viz_bridge/tools/record_stream.py \
 `pip install websockets`. Alternatively run it inside `rapp_viz` with
 `docker exec`, then `docker cp` the file out.)*
 
-### Option 2 — Record the live robot (or the VAM's predicted "ghost" joints)
-Same recorder; just have the real pipeline running so `/vam/joint_states` and
-`/joint_states` are live, then:
+### Option 2 — Record the live robot
+Same recorder; just have the real pipeline running so `/joint_states` (and, if the
+viz node + skeleton relay are up, `activations` / `skeleton`) are live, then:
 ```bash
 python3 ros2_ws/src/vam_viz_bridge/tools/record_stream.py \
     ws://localhost:8765 --out viz_student_pack/recordings/live_demo.jsonl --duration 90
@@ -280,7 +280,7 @@ WiFi/firewall issues before anyone opens Unity.
 3. **Unity/browser, fully offline:** run their own `player.py recordings/r1g1.jsonl --loop`
    and connect to `ws://localhost:8765`.
 4. **No Python at all:** Unity reads a recording file directly — set
-   `VamClient.Source = FilePlayback` and assign the `.jsonl` (renamed `.jsonl.txt`).
+   `EnactClient.Source = FilePlayback` and assign the `.jsonl` (renamed `.jsonl.txt`).
    Zero install, fully offline.
 
 Because the protocol is identical in all cases, **a visualization students build
@@ -309,6 +309,19 @@ pub.publish(Float32MultiArray(data=my_vector.tolist()))
 Supported message types out of the box: `JointState`, `Float32/64MultiArray`,
 ZED `ObjectsStamped`. A genuinely new type needs one serializer function in
 `ros2_ws/src/vam_viz_bridge/vam_viz_bridge/serializers.py`.
+
+### Worked example: the human skeleton
+This is the relay pattern in action. The lightweight bridge has no `zed_msgs`, so
+a tiny relay (run where `zed_msgs` exists, e.g. `rapp_vam`) converts the ZED
+skeleton into a generic `Float32MultiArray` on `/vam/skeleton`, which the bridge
+streams as the **`skeleton`** channel (`[18,3]` keypoints):
+```bash
+# needs a skeleton source: live ZED, or a rosbag playing the skeletons topic
+ros2 run vam_inference skeleton_relay
+#   options: -p target_skeleton_id:=5   -p output_topic:=/vam/skeleton
+```
+The `skeleton` channel is already in `bridge_channels.yaml`. Visualize it in Unity
+with `SkeletonVisualizer` (+ `FlyCamera` to move around) — see `unity/README.md`.
 
 ---
 
@@ -424,11 +437,11 @@ viz_student_pack/
 ├── player.py                            # offline replay server (no ROS)
 ├── recordings/{r1g1,r2g1}.jsonl         # sample datasets
 ├── web/index.html                       # browser viewer + connection test
-└── unity/                                # VamClient + VamData + VamInspector
-    ├── VamClient.cs  VamData.cs           #   connection + per-object data input
-    ├── VamJson.cs    VamFrame.cs          #   bundled parser + data model
-    ├── VamInspector.cs                    #   default overlay (every channel)
-    ├── VamVisualizerTemplate.cs           #   copy-me starter for new visuals
+└── unity/                                # EnactClient + EnactData + EnactInspector
+    ├── EnactClient.cs  EnactData.cs           #   connection + per-object data input
+    ├── EnactJson.cs    EnactFrame.cs          #   bundled parser + data model
+    ├── EnactInspector.cs                    #   default overlay (every channel)
+    ├── EnactVisualizerTemplate.cs           #   copy-me starter for new visuals
     ├── ExampleAttentionHeatmap.cs  ExampleJointBars.cs  JointVisualizer.cs
     ├── ConnectionStatusUI.cs
     └── README.md

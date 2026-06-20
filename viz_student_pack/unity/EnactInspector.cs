@@ -1,6 +1,6 @@
-// VamInspector.cs — the default "just show me everything" visualizer.
+// EnactInspector.cs — the default "just show me everything" visualizer.
 //
-// Attach this to ONE GameObject (alongside or near a VamClient) and press Play.
+// Attach this to ONE GameObject (alongside or near a EnactClient) and press Play.
 // It draws an on-screen panel listing EVERY channel currently arriving:
 //   * flat vectors  -> labeled value + bar
 //   * matrices/tensors -> a colored heatmap grid (attention, etc.)
@@ -10,10 +10,10 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-public class VamInspector : MonoBehaviour
+public class EnactInspector : MonoBehaviour
 {
-    [Tooltip("Leave empty to auto-find the scene's VamClient.")]
-    public VamClient client;
+    [Tooltip("Leave empty to auto-find the scene's EnactClient.")]
+    public EnactClient client;
 
     [Header("Layout")]
     public float panelWidth = 420f;
@@ -32,19 +32,19 @@ public class VamInspector : MonoBehaviour
 
     void Start()
     {
-        if (client == null) client = VamClient.Instance != null ? VamClient.Instance : FindObjectOfType<VamClient>();
+        if (client == null) client = EnactClient.Instance != null ? EnactClient.Instance : FindObjectOfType<EnactClient>();
     }
 
     void OnGUI()
     {
-        if (client == null) { GUI.Label(new Rect(12, 12, 400, 24), "VamInspector: no VamClient found."); return; }
+        if (client == null) { GUI.Label(new Rect(12, 12, 400, 24), "EnactInspector: no EnactClient found."); return; }
 
         float x = 12f, y = 12f;
         GUI.color = Color.white;
         GUI.Box(new Rect(x, y, panelWidth, 28), "");
         GUI.Label(new Rect(x + 8, y + 5, panelWidth, 22),
-            client.IsConnected ? $"VAM ● connected   {client.Hz:F0} Hz   channels: {client.LatestByChannel.Count}"
-                               : "VAM ○ connecting…");
+            client.IsConnected ? $"ENACT ● connected   {client.Hz:F0} Hz   channels: {client.LatestByChannel.Count}"
+                               : "ENACT ○ connecting…");
         y += 34f;
 
         float viewHeight = Screen.height - y - 12f;
@@ -78,13 +78,13 @@ public class VamInspector : MonoBehaviour
         return h + 20f;
     }
 
-    float TensorHeight(VamTensor t)
+    float TensorHeight(EnactTensor t)
     {
         if (t.shape != null && t.shape.Length >= 2) return t.Rows * cellPixels + 18f;
         return Mathf.Min(t.Length, maxBarsPerChannel) * 16f + 18f;
     }
 
-    float DrawChannel(string ch, VamFrame f, float x, float y)
+    float DrawChannel(string ch, EnactFrame f, float x, float y)
     {
         GUI.color = new Color(0.6f, 0.8f, 1f);
         GUI.Label(new Rect(x, y, panelWidth, 20), $"▸ {ch}");

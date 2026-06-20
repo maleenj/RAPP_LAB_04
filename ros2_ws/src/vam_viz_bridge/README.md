@@ -1,6 +1,6 @@
 # vam_viz_bridge — live visualization streaming
 
-Stream live data from the VAM (joint angles, and later neural-network internal
+Stream live data from ENACT (joint angles, and later neural-network internal
 activations) over WiFi to **Unity, Unreal, or a browser** running on workshop
 attendees' laptops. Plug-and-play: if you're on the network, you can receive the
 stream.
@@ -12,8 +12,8 @@ message out as a uniform JSON frame.
 
 ```
  existing ROS topics ─┐
-  /vam/joint_states    │   ┌──────────────────┐   ws://<host-ip>:8765   ┌── Unity laptop
-  /vam/joint_targets   ├──▶│  vam_viz_bridge  │──── JSON frames ────────┼── Unreal laptop
+  /joint_states        │   ┌──────────────────┐   ws://<host-ip>:8765   ┌── Unity laptop
+  /vam/skeleton        ├──▶│  vam_viz_bridge  │──── JSON frames ────────┼── Unreal laptop
   /joint_states        │   │ (config-driven)  │   (broadcast)           ├── browser test page
   /vam/activations*    ┘   └──────────────────┘                         └── big screen
   (* Phase 2, opt-in)
@@ -63,8 +63,8 @@ render as a heatmap. This page is also the reference client implementation.
 **Pure-ROS sanity check** (is the upstream data even there?):
 
 ```bash
-ros2 topic hz /vam/joint_states
-ros2 topic echo /vam/joint_states --once
+ros2 topic hz /joint_states
+ros2 topic echo /joint_states --once
 ```
 
 ---
@@ -75,7 +75,7 @@ Each WebSocket message is one JSON object:
 
 ```json
 {
-  "channel": "joint_states",
+  "channel": "robot_joint_states",
   "stamp": 1749567890.123,
   "shape": [6],
   "data": [0.01, -1.57, 1.2, 0.0, 0.3, -0.1],
@@ -104,10 +104,14 @@ instead of `shape`/`data`:
 
 | Channel | Source topic | Shape | Notes |
 |---|---|---|---|
-| `joint_states` | `/vam/joint_states` | `[6]` | VAM predicted ("ghost") joints, ~15 Hz, has `labels` |
-| `joint_targets` | `/vam/joint_targets` | `[6]` | normalized targets sent to PVT streamer |
-| `robot_joint_states` | `/joint_states` | `[N]` | real measured robot joints, has `labels` |
-| `activations` | `/vam/activations` | tensors | **Phase 2**, opt-in (see below) |
+| `robot_joint_states` | `/joint_states` | `[6]` | the robot's **actual** measured joints (radians), has `labels` |
+| `skeleton` | `/vam/skeleton` | `[18,3]` | human keypoints (ZED BODY_18), via `skeleton_relay` |
+| `activations` | `/vam/activations` | tensors | **Phase 2** "brain scan", when the viz node runs (see below) |
+
+> Only the robot's **physical** joint state is streamed. ENACT's predicted
+> `/vam/joint_states` and commanded `/vam/joint_targets` are intentionally not
+> bridged — visuals should track what the arm is actually doing. (Those ROS
+> topics still exist for the robot pipeline.)
 
 Edit channels in `config/bridge_channels.yaml`.
 
@@ -131,7 +135,7 @@ public class VamStream : MonoBehaviour {
         ws.OnMessage += (bytes) => {
             var json = System.Text.Encoding.UTF8.GetString(bytes);
             var frame = JsonUtility.FromJson<Frame>(json);
-            if (frame.channel == "joint_states") {
+            if (frame.channel == "robot_joint_states") {
                 // frame.data is float[]; drive your rig here
             }
         };
@@ -175,7 +179,7 @@ Socket->OnMessage().AddLambda([](const FString& Msg) {
     if (FJsonSerializer::Deserialize(Reader, Obj)) {
         const FString Channel = Obj->GetStringField(TEXT("channel"));
         const TArray<TSharedPtr<FJsonValue>>* Data;
-        if (Channel == TEXT("joint_states") && Obj->TryGetArrayField(TEXT("data"), Data)) {
+        if (Channel == TEXT("robot_joint_states") && Obj->TryGetArrayField(TEXT("data"), Data)) {
             // (*Data)[i]->AsNumber()  -> drive your rig
         }
     }
@@ -272,7 +276,7 @@ bridge — the robot is never touched. The viz image needs `numpy` (already in
 
 | Symptom | Check |
 |---|---|
-| Client connects but no frames | Is the upstream topic publishing? `ros2 topic hz /vam/joint_states` |
+| Client connects but no frames | Is the upstream topic publishing? `ros2 topic hz /joint_states` |
 | Client can't reach `ws://...` | WiFi **client isolation** (AP setting) blocks laptop↔host; use a switch/router that allows it. Also check the host firewall on port 8765. |
 | Bridge logs no channels | A message type couldn't be imported (e.g. `zed_msgs`) — it logs a warning and skips that channel. |
 | Frames lag / stutter | Expected on a slow client — the bridge is latest-frame-wins, so a slow laptop just sees newer data, it never backs up the robot. |

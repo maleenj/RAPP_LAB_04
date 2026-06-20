@@ -1,44 +1,44 @@
-// VamJson.cs — tiny, self-contained JSON parser (no external packages).
+// EnactJson.cs — tiny, self-contained JSON parser (no external packages).
 //
 // Why this exists: Unity's built-in JsonUtility can't parse objects with dynamic
 // keys (our `tensors` field, e.g. attention matrices). This minimal parser does,
 // so EVERY channel — flat vectors and nested matrices — is readable with zero
-// extra dependencies. You normally don't touch this file; VamClient uses it for you.
+// extra dependencies. You normally don't touch this file; EnactClient uses it for you.
 //
 // Supports: objects, arrays, strings, numbers, true/false/null. Good enough for
-// the VAM frame format. Not a general-purpose validator.
+// the ENACT frame format. Not a general-purpose validator.
 
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
 
-public class VamJson
+public class EnactJson
 {
-    // Underlying value is one of: Dictionary<string,VamJson>, List<VamJson>,
+    // Underlying value is one of: Dictionary<string,EnactJson>, List<EnactJson>,
     // string, double, bool, or null.
     object _v;
 
-    public static readonly VamJson Null = new VamJson { _v = null };
+    public static readonly EnactJson Null = new EnactJson { _v = null };
 
     public bool IsNull => _v == null;
-    public bool IsObject => _v is Dictionary<string, VamJson>;
-    public bool IsArray => _v is List<VamJson>;
+    public bool IsObject => _v is Dictionary<string, EnactJson>;
+    public bool IsArray => _v is List<EnactJson>;
 
     // ---- accessors --------------------------------------------------------- //
-    public VamJson this[string key]
+    public EnactJson this[string key]
     {
         get
         {
-            if (_v is Dictionary<string, VamJson> d && d.TryGetValue(key, out var n)) return n;
+            if (_v is Dictionary<string, EnactJson> d && d.TryGetValue(key, out var n)) return n;
             return Null;
         }
     }
 
-    public VamJson this[int i]
+    public EnactJson this[int i]
     {
         get
         {
-            if (_v is List<VamJson> l && i >= 0 && i < l.Count) return l[i];
+            if (_v is List<EnactJson> l && i >= 0 && i < l.Count) return l[i];
             return Null;
         }
     }
@@ -47,16 +47,16 @@ public class VamJson
     {
         get
         {
-            if (_v is List<VamJson> l) return l.Count;
-            if (_v is Dictionary<string, VamJson> d) return d.Count;
+            if (_v is List<EnactJson> l) return l.Count;
+            if (_v is Dictionary<string, EnactJson> d) return d.Count;
             return 0;
         }
     }
 
-    public bool Has(string key) => _v is Dictionary<string, VamJson> d && d.ContainsKey(key);
+    public bool Has(string key) => _v is Dictionary<string, EnactJson> d && d.ContainsKey(key);
 
     public IEnumerable<string> Keys =>
-        _v is Dictionary<string, VamJson> d ? d.Keys : new List<string>();
+        _v is Dictionary<string, EnactJson> d ? (IEnumerable<string>)d.Keys : new List<string>();
 
     public double AsDouble => _v is double n ? n : 0.0;
     public float AsFloat => (float)AsDouble;
@@ -66,7 +66,7 @@ public class VamJson
 
     public float[] AsFloatArray()
     {
-        if (!(_v is List<VamJson> l)) return new float[0];
+        if (!(_v is List<EnactJson> l)) return new float[0];
         var arr = new float[l.Count];
         for (int i = 0; i < l.Count; i++) arr[i] = l[i].AsFloat;
         return arr;
@@ -74,7 +74,7 @@ public class VamJson
 
     public int[] AsIntArray()
     {
-        if (!(_v is List<VamJson> l)) return new int[0];
+        if (!(_v is List<EnactJson> l)) return new int[0];
         var arr = new int[l.Count];
         for (int i = 0; i < l.Count; i++) arr[i] = l[i].AsInt;
         return arr;
@@ -82,14 +82,14 @@ public class VamJson
 
     public string[] AsStringArray()
     {
-        if (!(_v is List<VamJson> l)) return new string[0];
+        if (!(_v is List<EnactJson> l)) return new string[0];
         var arr = new string[l.Count];
         for (int i = 0; i < l.Count; i++) arr[i] = l[i].AsString;
         return arr;
     }
 
     // ---- parsing ----------------------------------------------------------- //
-    public static VamJson Parse(string s)
+    public static EnactJson Parse(string s)
     {
         int i = 0;
         try
@@ -108,25 +108,25 @@ public class VamJson
         while (i < s.Length && (s[i] == ' ' || s[i] == '\t' || s[i] == '\n' || s[i] == '\r')) i++;
     }
 
-    static VamJson ParseValue(string s, ref int i)
+    static EnactJson ParseValue(string s, ref int i)
     {
         SkipWs(s, ref i);
         if (i >= s.Length) return Null;
         char c = s[i];
         if (c == '{') return ParseObject(s, ref i);
         if (c == '[') return ParseArray(s, ref i);
-        if (c == '"') return new VamJson { _v = ParseString(s, ref i) };
+        if (c == '"') return new EnactJson { _v = ParseString(s, ref i) };
         if (c == 't' || c == 'f') return ParseBool(s, ref i);
         if (c == 'n') { i += 4; return Null; } // null
         return ParseNumber(s, ref i);
     }
 
-    static VamJson ParseObject(string s, ref int i)
+    static EnactJson ParseObject(string s, ref int i)
     {
-        var d = new Dictionary<string, VamJson>();
+        var d = new Dictionary<string, EnactJson>();
         i++; // {
         SkipWs(s, ref i);
-        if (i < s.Length && s[i] == '}') { i++; return new VamJson { _v = d }; }
+        if (i < s.Length && s[i] == '}') { i++; return new EnactJson { _v = d }; }
         while (i < s.Length)
         {
             SkipWs(s, ref i);
@@ -140,15 +140,15 @@ public class VamJson
             if (i < s.Length && s[i] == '}') { i++; break; }
             break;
         }
-        return new VamJson { _v = d };
+        return new EnactJson { _v = d };
     }
 
-    static VamJson ParseArray(string s, ref int i)
+    static EnactJson ParseArray(string s, ref int i)
     {
-        var l = new List<VamJson>();
+        var l = new List<EnactJson>();
         i++; // [
         SkipWs(s, ref i);
-        if (i < s.Length && s[i] == ']') { i++; return new VamJson { _v = l }; }
+        if (i < s.Length && s[i] == ']') { i++; return new EnactJson { _v = l }; }
         while (i < s.Length)
         {
             var val = ParseValue(s, ref i);
@@ -158,7 +158,7 @@ public class VamJson
             if (i < s.Length && s[i] == ']') { i++; break; }
             break;
         }
-        return new VamJson { _v = l };
+        return new EnactJson { _v = l };
     }
 
     static string ParseString(string s, ref int i)
@@ -197,7 +197,7 @@ public class VamJson
         return sb.ToString();
     }
 
-    static VamJson ParseNumber(string s, ref int i)
+    static EnactJson ParseNumber(string s, ref int i)
     {
         int start = i;
         while (i < s.Length)
@@ -208,12 +208,12 @@ public class VamJson
         }
         double.TryParse(s.Substring(start, i - start), NumberStyles.Float,
                         CultureInfo.InvariantCulture, out double val);
-        return new VamJson { _v = val };
+        return new EnactJson { _v = val };
     }
 
-    static VamJson ParseBool(string s, ref int i)
+    static EnactJson ParseBool(string s, ref int i)
     {
-        if (s[i] == 't') { i += 4; return new VamJson { _v = true }; }   // true
-        i += 5; return new VamJson { _v = false };                        // false
+        if (s[i] == 't') { i += 4; return new EnactJson { _v = true }; }   // true
+        i += 5; return new EnactJson { _v = false };                        // false
     }
 }

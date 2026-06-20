@@ -1,4 +1,4 @@
-# VAM Visualization — Student Pack
+# ENACT Visualization — Student Pack
 
 Everything you need to receive the robot's live data stream and visualize it in
 **Unity** (or a browser), **without ROS2 and without the robot**. Works on
@@ -30,9 +30,9 @@ Every message is one JSON object, same shape for every channel:
 ```
 
 `data` is **joint angles in radians**. Channels you'll see: `robot_joint_states`
-(real robot), `joint_states` (the model's predicted "ghost" joints),
-`joint_targets`. (Later in the workshop an `activations` channel with neural-net
-internals appears.)
+(the robot's actual joints — visuals track the physical arm) and `skeleton`
+(the human's 3D keypoints). (Later in the workshop an `activations` channel with
+neural-net internals appears.)
 
 ---
 
@@ -49,10 +49,10 @@ the network.
 
 ### 2. Unity — live (connect to the robot / the instructor's server)
 Follow `unity/README.md`. The Unity pack does the data plumbing for you: add a
-**VamInspector** to see every channel instantly, then add a **VamData** component
-(pick a channel) + copy **VamVisualizerTemplate** and write only your visual.
+**EnactInspector** to see every channel instantly, then add a **EnactData** component
+(pick a channel) + copy **EnactVisualizerTemplate** and write only your visual.
 No JSON package needed. In short: new 3D project → install NativeWebSocket →
-add the three scripts → set `VamClient.Url` to the instructor's address → Play.
+add the three scripts → set `EnactClient.Url` to the instructor's address → Play.
 Six cubes rotate with the live motion.
 
 ### 3. Unity / browser — fully offline (your own recorded playback)

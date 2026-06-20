@@ -3,23 +3,23 @@
 // A second, even-simpler example (complements JointVisualizer's cube rotations).
 // Reads a flat joint channel and scales one bar per joint.
 //
-// SETUP: add a VamData component (channel = "robot_joint_states") and this script
+// SETUP: add a EnactData component (channel = "robot_joint_states") and this script
 // to an empty GameObject. Press Play.
 
 using UnityEngine;
 
-[RequireComponent(typeof(VamData))]
+[RequireComponent(typeof(EnactData))]
 public class ExampleJointBars : MonoBehaviour
 {
     public float spacing = 1.2f;
     public float heightScale = 0.5f;   // metres per radian
     [Range(0f, 0.95f)] public float smoothing = 0.4f;
 
-    VamData data;
+    EnactData data;
     Transform[] bars;
     float[] current;
 
-    void Awake() { data = GetComponent<VamData>(); }
+    void Awake() { data = GetComponent<EnactData>(); }
 
     void Update()
     {

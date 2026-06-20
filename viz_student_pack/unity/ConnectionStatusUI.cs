@@ -9,14 +9,14 @@ using UnityEngine;
 
 public class ConnectionStatusUI : MonoBehaviour
 {
-    public VamClient client;
+    public EnactClient client;
 
     [Tooltip("Channel whose latest values to show.")]
     public string channel = "robot_joint_states";
 
     void Start()
     {
-        if (client == null) client = FindObjectOfType<VamClient>();
+        if (client == null) client = FindObjectOfType<EnactClient>();
     }
 
     void OnGUI()

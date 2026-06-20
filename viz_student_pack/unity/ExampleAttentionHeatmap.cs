@@ -4,7 +4,7 @@
 // attention. Reads a tensor channel (default "activations" -> "decoder_xattn",
 // [2,4,10,10]) and averages it down to one 10x10 map.
 //
-// SETUP: add a VamData component (channel = "activations") and this script to an
+// SETUP: add a EnactData component (channel = "activations") and this script to an
 // empty GameObject. Point your camera at it. Press Play (live robot, or a
 // recording that contains activations).
 //
@@ -12,7 +12,7 @@
 
 using UnityEngine;
 
-[RequireComponent(typeof(VamData))]
+[RequireComponent(typeof(EnactData))]
 public class ExampleAttentionHeatmap : MonoBehaviour
 {
     [Tooltip("Which tensor inside the channel to draw (averaged over its layers/heads).")]
@@ -23,16 +23,16 @@ public class ExampleAttentionHeatmap : MonoBehaviour
 
     public Gradient colors = DefaultGradient();
 
-    VamData data;
+    EnactData data;
     Transform[,] cells;
     int rows, cols;
 
-    void Awake() { data = GetComponent<VamData>(); }
+    void Awake() { data = GetComponent<EnactData>(); }
 
     void Update()
     {
         if (!data.HasData) return;
-        VamTensor t = data.Tensor(tensorName);
+        EnactTensor t = data.Tensor(tensorName);
         if (t == null || t.Rows <= 0 || t.Cols <= 0) return;
 
         if (cells == null || rows != t.Rows || cols != t.Cols)
