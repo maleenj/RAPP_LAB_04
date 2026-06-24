@@ -1,0 +1,151 @@
+// ParticleFlowField.compute — GPU particle simulation driven by the 18 skeleton
+// points. Particles are pulled toward the moving body points, pushed away when
+// too close, and pushed around by flow-noise turbulence (stronger where the body
+// moves fast). Dead / out-of-bounds particles respawn near a random body point.
+//
+// One buffer of Particle, simulated entirely on the GPU. Cheap on an RTX 2080.
+
+#pragma kernel Init
+#pragma kernel Simulate
+
+struct Particle { float3 pos; float3 vel; float life; float seed; };
+
+RWStructuredBuffer<Particle> _Particles;
+StructuredBuffer<float4>      _Attractors;   // xyz = world position, w = speed
+
+uint  _ParticleCount;
+uint  _AttractorCount;
+float _DeltaTime;
+float _TimeY;
+
+float _AttractStrength;
+float _AttractFalloff;
+float _RepelRadius;
+float _RepelStrength;
+
+float _Turbulence;
+float _TurbScale;
+float _TurbSpeed;
+float _VelTurbulence;
+float _MeanSpeed;
+
+float _Drag;
+float _SpawnRadius;
+float _ParticleLife;
+float _EmitFromBody;   // >0.5 = spawn near a body point; else fill the volume
+float _SpawnSpeed;     // initial outward speed so particles flow, not pile up
+
+float3 _BoundsCenter;
+float  _BoundsRadius;
+
+// ---------------- hashing / value noise ---------------- //
+float hash11(float p){ p = frac(p * 0.1031); p *= p + 33.33; p *= p + p; return frac(p); }
+
+float hash13(float3 p){ p = frac(p * 0.1031); p += dot(p, p.zyx + 31.32); return frac((p.x + p.y) * p.z); }
+
+float3 hash33(float3 p){
+    p = frac(p * float3(0.1031, 0.1030, 0.0973));
+    p += dot(p, p.yxz + 33.33);
+    return frac((p.xxy + p.yxx) * p.zyx);
+}
+
+float vnoise(float3 x){
+    float3 i = floor(x);
+    float3 f = frac(x);
+    f = f * f * (3.0 - 2.0 * f);
+    float n000 = hash13(i + float3(0,0,0));
+    float n100 = hash13(i + float3(1,0,0));
+    float n010 = hash13(i + float3(0,1,0));
+    float n110 = hash13(i + float3(1,1,0));
+    float n001 = hash13(i + float3(0,0,1));
+    float n101 = hash13(i + float3(1,0,1));
+    float n011 = hash13(i + float3(0,1,1));
+    float n111 = hash13(i + float3(1,1,1));
+    float nx00 = lerp(n000, n100, f.x);
+    float nx10 = lerp(n010, n110, f.x);
+    float nx01 = lerp(n001, n101, f.x);
+    float nx11 = lerp(n011, n111, f.x);
+    float nxy0 = lerp(nx00, nx10, f.y);
+    float nxy1 = lerp(nx01, nx11, f.y);
+    return lerp(nxy0, nxy1, f.z);
+}
+
+float3 flowNoise(float3 p){
+    return float3(vnoise(p), vnoise(p + 19.19), vnoise(p - 7.31)) * 2.0 - 1.0;
+}
+
+void Respawn(inout Particle p, uint id){
+    float r = hash11(id * 0.01731 + _TimeY * 1.137 + p.seed);
+    float3 rnd = hash33(float3(id * 0.013 + _TimeY, id * 0.029 - _TimeY, _TimeY * 0.7 + id)) * 2.0 - 1.0;
+    float3 dir = normalize(rnd + 1e-5);
+    float u = frac(r * 7.13);
+    float radial = pow(u, 0.3333);                 // uniform within a sphere (no cube edges)
+
+    float3 center;
+    float  radius;
+    if (_EmitFromBody > 0.5 && _AttractorCount > 0u){
+        uint k = (uint)(frac(r) * _AttractorCount);
+        if (k >= _AttractorCount) k = 0u;
+        center = _Attractors[k].xyz;
+        radius = _SpawnRadius;
+    } else {
+        center = _BoundsCenter;                     // fill the whole volume; body just sculpts it
+        radius = _BoundsRadius * 0.9;
+    }
+
+    p.pos  = center + dir * radial * radius;
+    p.vel  = dir * _SpawnSpeed;
+    p.life = _ParticleLife * (0.4 + 0.6 * u);
+}
+
+[numthreads(64,1,1)]
+void Init(uint3 gid : SV_DispatchThreadID){
+    uint id = gid.x;
+    if (id >= _ParticleCount) return;
+    Particle p;
+    p.seed = hash11(id + 1.0);
+    p.pos = 0; p.vel = 0; p.life = 0;
+    Respawn(p, id);
+    // scatter starting life so they don't all die on the same frame
+    p.life = _ParticleLife * frac(p.seed * 3.137 + 0.1);
+    _Particles[id] = p;
+}
+
+[numthreads(64,1,1)]
+void Simulate(uint3 gid : SV_DispatchThreadID){
+    uint id = gid.x;
+    if (id >= _ParticleCount) return;
+
+    Particle p = _Particles[id];
+    float dt = _DeltaTime;
+
+    float3 accel = 0;
+
+    // pull toward each body point (+ short-range push when too close)
+    [loop]
+    for (uint k = 0u; k < _AttractorCount; k++){
+        float3 ap  = _Attractors[k].xyz;
+        float  spd = _Attractors[k].w;
+        float3 d   = ap - p.pos;
+        float  dist = length(d) + 1e-4;
+        float3 dir  = d / dist;
+        float  pull = _AttractStrength / (1.0 + _AttractFalloff * dist * dist);
+        accel += dir * pull * (1.0 + spd);
+        if (dist < _RepelRadius)
+            accel -= dir * _RepelStrength * (1.0 - dist / _RepelRadius);
+    }
+
+    // flow-noise turbulence, boosted by how fast the body is moving
+    float3 np = p.pos * _TurbScale + float3(0.0, _TimeY * _TurbSpeed, 0.0);
+    accel += flowNoise(np) * (_Turbulence + _MeanSpeed * _VelTurbulence);
+
+    p.vel += accel * dt;
+    p.vel *= pow(_Drag, dt * 60.0);     // frame-rate-independent damping
+    p.pos += p.vel * dt;
+    p.life -= dt;
+
+    if (p.life <= 0.0 || length(p.pos - _BoundsCenter) > _BoundsRadius)
+        Respawn(p, id);
+
+    _Particles[id] = p;
+}

@@ -76,6 +76,11 @@ Ready examples to read/remix: **`ExampleAttentionHeatmap`** (attention → a 3D
 grid of colored quads), **`ExampleJointBars`** (joints → 3D bars), and
 **`SkeletonVisualizer`** (the human in 3D).
 
+> **Special / advanced examples** live in `SpecialExamples/`, each with its own
+> setup README. Start with **`SpecialExamples/01_ParticleFlowField/`** — a GPU
+> particle cloud sculpted by the body (the skeleton points become attractors;
+> you see only the turbulence they create). Stunning, GPU-cheap, fully tunable.
+
 ### See the human skeleton in 3D
 1. On the host, run the relay so the skeleton becomes a stream:
    `ros2 run vam_inference skeleton_relay` (needs a skeleton source — live ZED or

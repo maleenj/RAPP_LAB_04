@@ -29,6 +29,9 @@ public class JointVisualizer : MonoBehaviour
     [Tooltip("Smoothing (0 = snap, 0.9 = very smooth).")]
     [Range(0f, 0.98f)] public float smoothing = 0.5f;
 
+    [Tooltip("Side length of each auto-spawned cube, in metres (0.25 = 25 cm).")]
+    public float cubeSize = 0.25f;
+
     float[] _current;
 
     void Start()
@@ -46,7 +49,8 @@ public class JointVisualizer : MonoBehaviour
             var cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
             cube.name = $"Joint_{i}";
             cube.transform.SetParent(transform, false);
-            cube.transform.localPosition = new Vector3(i * 1.5f, 0, 0);
+            cube.transform.localScale = Vector3.one * cubeSize;   // 25 cm cube
+            cube.transform.localPosition = new Vector3(i * cubeSize * 1.5f, 0, 0);
             joints[i] = cube.transform;
         }
     }

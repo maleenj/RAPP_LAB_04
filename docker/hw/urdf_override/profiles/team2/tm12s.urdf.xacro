@@ -11,18 +11,18 @@
     <xacro:tm12s_ros2_control name="FakeSystem" initial_positions_file="$(arg initial_positions_file)"/>
 
     <!-- ==================== PEDESTAL POLE ==================== -->
-    <!-- 580mm tall central base supporting the robot; 450mm x 450mm square top -->
+    <!-- 800mm tall central base supporting the robot; 250mm x 250mm square cross-section -->
     <!-- Extends downward from the robot base (base link is at top of pole) -->
     <joint name="pole_joint" type="fixed">
         <parent link="base"/>
         <child link="pole_link"/>
-        <origin xyz="0 0 -0.29" rpy="0 0 0"/>
+        <origin xyz="0 0 -0.4" rpy="0 0 0"/>
     </joint>
 
     <link name="pole_link">
         <visual>
             <geometry>
-                <box size="0.45 0.45 0.58"/>
+                <box size="0.25 0.25 0.8"/>
             </geometry>
             <material name="pole_gray">
                 <color rgba="0.3 0.3 0.3 1.0"/>
@@ -30,7 +30,7 @@
         </visual>
         <collision>
             <geometry>
-                <box size="0.45 0.45 0.58"/>
+                <box size="0.25 0.25 0.8"/>
             </geometry>
         </collision>
         <inertial>
@@ -40,17 +40,17 @@
     </link>
 
     <!-- ==================== GROUND PLANE ==================== -->
-    <!-- Circular base plate 1220mm diameter, 20mm thick, at the bottom of the pole -->
+    <!-- Square base plate 900mm x 900mm, 200mm thick, at the bottom of the pole -->
     <joint name="ground_joint" type="fixed">
         <parent link="base"/>
         <child link="ground_link"/>
-        <origin xyz="0 0 -0.59" rpy="0 0 0"/>
+        <origin xyz="0 0 -0.9" rpy="0 0 0"/>
     </joint>
 
     <link name="ground_link">
         <visual>
             <geometry>
-                <cylinder length="0.02" radius="0.61"/>
+                <box size="0.9 0.9 0.2"/>
             </geometry>
             <material name="ground_dark">
                 <color rgba="0.2 0.2 0.2 1.0"/>
@@ -58,7 +58,7 @@
         </visual>
         <collision>
             <geometry>
-                <cylinder length="0.02" radius="0.61"/>
+                <box size="0.9 0.9 0.2"/>
             </geometry>
         </collision>
         <inertial>
