@@ -14,6 +14,8 @@
   <depend>rclpy</depend>
   <depend>std_msgs</depend>
   <depend>sensor_msgs</depend>
+  <!-- Only used by vote_robot_bridge (SwitchModel.srv). The streaming bridge does not need it. -->
+  <depend>vam_interfaces</depend>
   <!-- Optional: only needed if a channel bridges the ZED skeleton topic.
        The bridge degrades gracefully (logs a warning, skips the channel) if absent. -->
   <exec_depend>zed_msgs</exec_depend>

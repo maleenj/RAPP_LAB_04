@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Results Backdrop</title>
+  <style>
+    /* Plain functional backdrop. Claude Design restyles this; keep using
+       VoteAPI.onState() / VoteAPI.getRatio(). ratio: 0 = all mirror, 1 = all contrast. */
+    html, body { height: 100%; margin: 0; overflow: hidden; background: #000; }
+    /* Two-tone gradient. We shift the gradient stops + luminance with the vote ratio. */
+    #stage {
+      position: fixed; inset: 0;
+      transition: background 1.2s linear;
+      background: linear-gradient(120deg, #0b3d91 0%, #b45309 100%);
+    }
+    #readout {
+      position: fixed; left: 50%; bottom: 5vh; transform: translateX(-50%);
+      font-family: system-ui, sans-serif; color: rgba(255,255,255,.55);
+      font-size: 1.4vw; letter-spacing: .15em; text-transform: uppercase;
+      mix-blend-mode: overlay; white-space: nowrap;
+    }
+  </style>
+</head>
+<body>
+  <div id="stage"></div>
+  <div id="readout">&nbsp;</div>
+
+  <script src="vote-api.js"></script>
+  <script>
+    var stage = document.getElementById('stage');
+    var readout = document.getElementById('readout');
+
+    // Mirror end (cool/blue) vs Contrast end (warm/amber).
+    // As ratio -> 1 (contrast wins), the warm side grows and brightens;
+    // as ratio -> 0 (mirror wins), the cool side grows and brightens.
+    function render(ratio) {
+      var r = Math.max(0, Math.min(1, ratio));
+      // luminance: whichever side leads gets brighter (max lift at the extremes).
+      var mirrorL = 30 + (1 - r) * 35;   // %
+      var contrastL = 30 + r * 35;       // %
+      var mirrorCol = 'hsl(217, 80%, ' + mirrorL.toFixed(1) + '%)';
+      var contrastCol = 'hsl(33, 90%, ' + contrastL.toFixed(1) + '%)';
+      // gradient midpoint slides toward the losing side so the winner fills more screen.
+      var mid = (r * 100).toFixed(1);
+      stage.style.background =
+        'linear-gradient(120deg, ' + mirrorCol + ' 0%, ' + mirrorCol + ' ' +
+        Math.max(0, mid - 25).toFixed(1) + '%, ' + contrastCol + ' ' +
+        Math.min(100, (+mid) + 25).toFixed(1) + '%, ' + contrastCol + ' 100%)';
+    }
+
+    VoteAPI.onState(function (s) {
+      var r = (s && typeof s.ratio === 'number') ? s.ratio : 0.5;
+      render(r);
+      if (s && typeof s.active === 'number') {
+        readout.textContent = (s.winner && s.winner !== 'none' ? s.winner : '—') +
+          '   ·   ' + s.mirror + ' / ' + s.contrast;
+      }
+    }, 1000);
+
+    render(0.5);
+  </script>
+</body>
+</html>

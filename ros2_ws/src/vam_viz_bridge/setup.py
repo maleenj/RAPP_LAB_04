@@ -25,6 +25,7 @@ setup(
         'console_scripts': [
             'viz_bridge_node = vam_viz_bridge.viz_bridge_node:main',
             'test_client = vam_viz_bridge.test_client:main',
+            'vote_robot_bridge = vam_viz_bridge.vote_robot_bridge:main',
         ],
     },
 )

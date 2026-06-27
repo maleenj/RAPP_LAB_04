@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>Vote — Mirror or Contrast</title>
+  <style>
+    /* Plain functional version. Claude Design restyles this; keep the IDs:
+       #btn-mirror, #btn-contrast, #tally. */
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: #0b0b10; color: #f2f2f7;
+      display: flex; flex-direction: column; padding: 16px; gap: 14px;
+    }
+    h1 { font-size: 1.1rem; font-weight: 600; text-align: center; margin: 6px 0; opacity: .85; }
+    .buttons { flex: 1; display: flex; flex-direction: column; gap: 14px; }
+    button.vote {
+      flex: 1; border: 2px solid transparent; border-radius: 20px;
+      font-size: 1.6rem; font-weight: 700; color: #fff; cursor: pointer;
+      transition: transform .08s ease, box-shadow .2s ease, border-color .2s ease;
+    }
+    button.vote:active { transform: scale(.98); }
+    #btn-mirror   { background: linear-gradient(160deg, #1f6feb, #0b3d91); }
+    #btn-contrast { background: linear-gradient(160deg, #f59e0b, #b45309); }
+    button.vote.active { border-color: #fff; box-shadow: 0 0 0 4px rgba(255,255,255,.15); }
+    .sub { font-size: .85rem; font-weight: 500; opacity: .8; display: block; margin-top: 6px; }
+    #tally { text-align: center; font-size: .95rem; opacity: .85; min-height: 1.4em; }
+    .hint { text-align: center; font-size: .75rem; opacity: .5; }
+  </style>
+</head>
+<body>
+  <h1>Tap to steer the robot</h1>
+  <div class="buttons">
+    <button id="btn-mirror" class="vote">MIRROR<span class="sub">move with the performer</span></button>
+    <button id="btn-contrast" class="vote">CONTRAST<span class="sub">move against the performer</span></button>
+  </div>
+  <div id="tally">&nbsp;</div>
+  <div class="hint">Your vote keeps counting while this page is open.</div>
+
+  <script src="vote-api.js"></script>
+  <script>
+    var current = null;
+    var btnMirror = document.getElementById('btn-mirror');
+    var btnContrast = document.getElementById('btn-contrast');
+    var tally = document.getElementById('tally');
+
+    function setChoice(choice) {
+      current = choice;
+      btnMirror.classList.toggle('active', choice === 'mirror');
+      btnContrast.classList.toggle('active', choice === 'contrast');
+      VoteAPI.sendVote(choice);
+    }
+
+    btnMirror.addEventListener('click', function () { setChoice('mirror'); });
+    btnContrast.addEventListener('click', function () { setChoice('contrast'); });
+
+    // Heartbeat: re-send the current choice every 10s so this device stays "active".
+    setInterval(function () { if (current) VoteAPI.sendVote(current); }, 10000);
+
+    // Live tally so voters feel the crowd.
+    VoteAPI.onState(function (s) {
+      if (!s || typeof s.mirror !== 'number') { tally.textContent = ''; return; }
+      tally.textContent = 'Mirror ' + s.mirror + '  ·  Contrast ' + s.contrast +
+        '  (' + s.active + ' voting)';
+    }, 1500);
+  </script>
+</body>
+</html>
