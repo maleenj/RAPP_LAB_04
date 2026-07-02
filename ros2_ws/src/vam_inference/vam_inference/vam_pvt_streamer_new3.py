@@ -1,8 +1,38 @@
-"""Direct PVT Streamer (v3): VAM joint targets → TM12S via PVT streaming.
+"""Direct PVT Streamer (v4): VAM joint targets → TM12S via PVT streaming.
 
-Improvements over vam_pvt_streamer_new.py — all aimed at eliminating the
-J4/J5 "speed command too large" (xxF061) → Joint Drivers Alarm (0x35) → STO
-that occurs during wrist reorientations:
+Same as vam_pvt_streamer_new2.py PLUS the following-error (lag) throttle —
+FIX 5 — which is the change that actually addresses the remaining STOs.
+
+  FIX 5 (v4) — close the loop on ACTUAL position (following-error throttle).
+    Diagnosis: with the Performance Safety joint speeds confirmed at MAX
+    (J3 240, J4/J5 260 °/s), trips at only 37–44 °/s are NOT raw overspeed.
+    The fingerprint in every failure log is `drift` (commanded position
+    leading the actual arm) GROWING just before the trip — a following-error
+    runaway. The streamer integrates next_pos from its own last COMMANDED
+    position with no feedback from where the arm actually is, so on a fast
+    ramp the arm falls behind, drift accumulates, and the TM firmware ends up
+    rejecting a PVT segment as "speed command too large" because the buffered
+    command sits too far ahead of the lagging arm to reach in one segment.
+    FIX 5 throttles the per-joint velocity ceiling DOWN as that joint's lag
+    (|commanded − actual|) grows: full speed below following_error_soft_rad,
+    linearly to zero at following_error_hard_rad. The command can no longer
+    run away from the arm; it is self-correcting (lag shrinks → speed
+    returns) and per-joint (only the lagging joint slows), so smooth tracking
+    stays responsive.
+
+Inherited fixes from v2/v3:
+
+  FIX 1 (the important one) — trapezoidal position integration.
+    The TM firmware interpolates a *cubic Hermite* between consecutive PVT
+    points. For a segment (p0,v0)→(p1,v1) over T, the velocity profile is:
+        v(s) = (6d/T)·s(1−s) + v0·(3s²−4s+1) + v1·(3s²−2s),  d = p1−p0
+    The old code set d = v1·dt (forward-Euler). That leaves the s² terms
+    uncancelled, so the spline *bulges above v1* mid-segment — the bulge is
+    what clipped the J4/J5 safety ceiling and tripped the STO.
+    Setting d = ½(v0+v1)·dt (trapezoidal) gives 6d/T = 3(v0+v1), which
+    collapses the profile to v(s) = v0 + (v1−v0)·s — perfectly LINEAR, peak
+    velocity = max(v0,v1), ZERO overshoot. This is a mathematical guarantee,
+    not a heuristic.
 
   FIX 1 (the important one) — trapezoidal position integration.
     The TM firmware interpolates a *cubic Hermite* between consecutive PVT
@@ -31,13 +61,19 @@ that occurs during wrist reorientations:
   FIX 4 — per-joint diagnostics. Logs now report WHICH joint is at peak
     velocity, so a future trip is immediately attributable.
 
+  FIX 3 — no re-entry fail-loop (cool-down + rest ramp on PVT send failure).
+  FIX 4 — per-joint diagnostics (logs WHICH joint is at peak velocity).
+  Sudden-jump guard (v3) — debounce transient jumps (actor switch, walk-on,
+    misdetection); confirmed jumps run as a slow approach. Smooth fast
+    tracking stays full-speed (slow-approach is jump-triggered, not gap-based).
+
 Everything else (state machine, collision checking, MoveIt catch-up,
-filters) is unchanged from vam_pvt_streamer_new.py.
+filters) is unchanged from vam_pvt_streamer_new2.py.
 
 Usage:
-    ros2 run vam_inference vam_pvt_streamer_new2
+    ros2 run vam_inference vam_pvt_streamer_new3
 
-    ros2 run vam_inference vam_pvt_streamer_new2 --ros-args \\
+    ros2 run vam_inference vam_pvt_streamer_new3 --ros-args \\
         -p velocity_scale:=0.2 -p accel_scale:=0.1 -p filter_type:=none \\
         -p catch_up_threshold_rad:=0.1 -p catch_up_velocity_scale:=0.2
 """
@@ -138,11 +174,11 @@ class State(enum.Enum):
     HOLDING = "HOLDING"
 
 
-class VamPvtStreamerNew2(Node):
-    """Direct PVT streamer v3: VAM targets → TM12S robot (overshoot-safe)."""
+class VamPvtStreamerNew3(Node):
+    """Direct PVT streamer v4: VAM targets → TM12S robot (following-error safe)."""
 
     def __init__(self):
-        super().__init__("vam_pvt_streamer_new2")
+        super().__init__("vam_pvt_streamer_new3")
 
         # Parameters
         self.declare_parameter("pvt_rate_hz", 15.0)
@@ -169,6 +205,15 @@ class VamPvtStreamerNew2(Node):
         # PVT re-entry cool-down (sec) — lets the driver alarm clear before
         # streaming resumes, preventing the trip→re-enter→trip fail-loop.
         self.declare_parameter("reentry_cooldown_sec", 0.5)
+        # --- Following-error (lag) throttle [FIX 5] ---
+        # As a joint's commanded position leads its ACTUAL position (the arm
+        # lagging the stream), scale that joint's velocity ceiling down: full
+        # speed below following_error_soft_rad, linearly to zero at
+        # following_error_hard_rad. Stops the drift runaway that trips xxF061;
+        # self-correcting and per-joint, so it only bites on the lagging joint
+        # during fast accelerations and releases as the arm catches up.
+        self.declare_parameter("following_error_soft_rad", 0.07)   # ~4°
+        self.declare_parameter("following_error_hard_rad", 0.18)   # ~10°
         # --- Sudden-jump guard (general) ---
         # Protects against ALL sudden target jumps, whatever the cause: an actor
         # switching between two people on stage, someone walking onto the space
@@ -211,6 +256,8 @@ class VamPvtStreamerNew2(Node):
         self._collision_perturb = self.get_parameter("collision_perturbation_rad").value
         self._collision_candidates = self.get_parameter("collision_candidates").value
         self._reentry_cooldown = self.get_parameter("reentry_cooldown_sec").value
+        self._fe_soft = self.get_parameter("following_error_soft_rad").value
+        self._fe_hard = self.get_parameter("following_error_hard_rad").value
         self._jump_thresh = self.get_parameter("jump_threshold_rad").value
         self._jump_confirm_frames = self.get_parameter("jump_confirm_frames").value
         self._traverse_vel_scale = self.get_parameter("traverse_velocity_scale").value
@@ -312,7 +359,7 @@ class VamPvtStreamerNew2(Node):
         )
 
         self.get_logger().info(
-            f"VAM PVT Streamer v3 (overshoot-safe): /vam/joint_targets → PVT\n"
+            f"VAM PVT Streamer v4 (following-error safe): /vam/joint_targets → PVT\n"
             f"  rate={self._pvt_rate:.0f}Hz, vel_scale={self._vel_scale:.0%}, "
             f"accel_scale={self._accel_scale:.0%}, "
             f"headroom={self._safety_headroom:.0%}\n"
@@ -334,6 +381,8 @@ class VamPvtStreamerNew2(Node):
             f"{self._traverse_vel_scale:.0%} ceiling "
             f"([{', '.join(f'{math.degrees(v):.0f}' for v in self._traverse_max_vel)}] deg/s); "
             f"smooth tracking stays full-speed\n"
+            f"  following-error throttle: full speed <{math.degrees(self._fe_soft):.0f}° lag, "
+            f"→0 at {math.degrees(self._fe_hard):.0f}° lag (per-joint, self-correcting)\n"
             f"  position integration = TRAPEZOIDAL (cubic-overshoot-safe)"
         )
 
@@ -906,6 +955,20 @@ class VamPvtStreamerNew2(Node):
                 self.get_logger().info("Reached target — resuming normal tracking")
         active_max_vel = self._traverse_max_vel if self._traversing else self._max_vel
 
+        # === FIX 5: following-error (lag) throttle ===
+        # Scale each joint's velocity ceiling DOWN by how far the COMMANDED
+        # position (prev) currently leads the ACTUAL arm (current). This is the
+        # only feedback from the real robot in the loop: full speed while the
+        # arm keeps up (lag ≤ fe_soft), linearly to zero by fe_hard, so the
+        # commanded stream can never run away from the arm. Prevents the drift
+        # runaway that the firmware rejects as "speed command too large"
+        # (xxF061). Per-joint and self-correcting — as the arm catches up the
+        # lag shrinks and full speed returns, so smooth tracking stays snappy.
+        lag = np.abs(self._wrap(prev - current))
+        span = max(self._fe_hard - self._fe_soft, 1e-6)
+        lag_scale = np.clip(1.0 - (lag - self._fe_soft) / span, 0.0, 1.0)
+        active_max_vel = active_max_vel * lag_scale
+
         # Desired velocity toward target (from last SENT position, not current)
         # Normalize to [-π, π] to take shortest angular path
         error = (safe_target - prev + np.pi) % (2 * np.pi) - np.pi
@@ -963,13 +1026,17 @@ class VamPvtStreamerNew2(Node):
         active_ceiling = self._traverse_max_vel if self._traversing else self._max_vel
         peak_ceiling_deg = math.degrees(active_ceiling[peak_j])
         mode = "TRAVERSE" if self._traversing else "track"
+        # Following-error: max lag and whether the throttle is biting.
+        lag_deg = math.degrees(np.max(lag))
+        throttled = "" if np.min(lag_scale) > 0.99 else f", THROTTLED×{np.min(lag_scale):.2f}"
 
         if self._cmds_sent <= 10 or self._cmds_sent % 50 == 0 or self._traversing:
             self.get_logger().info(
                 f"PVT #{self._cmds_sent} [{mode}]: "
                 f"peak J{peak_j + 1}={peak_vel_deg:.1f}/{peak_ceiling_deg:.0f}°/s, "
                 f"gap={gap_deg:.1f}°, "
-                f"drift={drift_deg:.1f}°",
+                f"drift={drift_deg:.1f}°, "
+                f"lag={lag_deg:.1f}°{throttled}",
                 throttle_duration_sec=0.5,
             )
 
@@ -986,7 +1053,7 @@ class VamPvtStreamerNew2(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = VamPvtStreamerNew2()
+    node = VamPvtStreamerNew3()
 
     def signal_handler(sig, frame):
         node.get_logger().warn("Ctrl+C — shutting down...")

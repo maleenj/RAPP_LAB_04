@@ -32,6 +32,7 @@ setup(
             'vam_pvt_streamer = vam_inference.vam_pvt_streamer:main',
             'vam_pvt_streamer_new = vam_inference.vam_pvt_streamer_new:main',
             'vam_pvt_streamer_new2 = vam_inference.vam_pvt_streamer_new2:main',
+            'vam_pvt_streamer_new3 = vam_inference.vam_pvt_streamer_new3:main',
             'vam_pvt_streamer_new_fix = vam_inference.vam_pvt_streamer_new_fix:main',
             'vam_tm12s_node_diag = vam_inference.vam_tm12s_node_diag:main',
             'vam_pvt_streamer_diag = vam_inference.vam_pvt_streamer_diag:main',

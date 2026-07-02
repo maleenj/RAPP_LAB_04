@@ -5,8 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Genre Roulette</title>
   <style>
-    /* Plain functional roulette. Claude Design restyles this; keep #spin and #result,
-       and call VoteAPI.pickGenre() for the landing genre. Self-contained: NOT wired to robot. */
     :root { color-scheme: dark; }
     html, body { height: 100%; margin: 0; background: radial-gradient(circle at 50% 30%, #1a1a2e, #07070c); }
     body { font-family: system-ui, sans-serif; color: #fff; display: flex; flex-direction: column;
@@ -39,9 +37,21 @@
     }
     #spin:disabled { opacity: .4; cursor: default; }
     #result { min-height: 2.4rem; font-size: 1.8rem; font-weight: 800; text-align: center; }
+
+    /* Debug panel — only shown with ?debug=1 in the URL. Audience never sees this. */
+    #debug { position: fixed; top: 0; left: 0; right: 0; background: #10101a; color: #cdd;
+             border-bottom: 2px solid #303048; padding: 10px 16px; font-size: .9rem; z-index: 10; }
+    #debug h2 { margin: 0 0 6px; font-size: .8rem; letter-spacing: .1em; text-transform: uppercase; color: #f59e0b; }
+    #debug ol { margin: 4px 0; padding-left: 20px; }
+    #debug li.now { color: #fff; font-weight: 800; }
+    #debug li.now::after { content: '  ⟵ NEXT PRESS'; color: #f59e0b; font-weight: 700; }
+    #debug button { margin-top: 6px; padding: 6px 14px; border-radius: 6px; border: none;
+                    background: #f59e0b; color: #07070c; font-weight: 700; cursor: pointer; }
   </style>
 </head>
 <body>
+  <div id="debug" hidden></div>
+
   <h1>Genre Roulette</h1>
   <div class="wrap">
     <div class="pointer"></div>
@@ -52,24 +62,41 @@
 
   <script src="vote-api.js"></script>
   <script>
-    // Wheel segment order must match the conic-gradient above and VoteAPI.GENRES.
+    // Wheel segment order — must match the conic-gradient stops above.
     var ORDER = ['superhero', 'jhorror', 'romcom', 'bollywood'];
-    var LABELS = { superhero: 'Hollywood\nSuperhero', jhorror: 'Japanese\nHorror',
-                   romcom: 'English\nRom-com', bollywood: 'Bollywood\nMusical' };
+    var LABELS = { superhero: 'Hollywood Superhero', jhorror: 'Japanese Horror',
+                   romcom: 'English Rom-com', bollywood: 'Bollywood Musical' };
 
+    // ---- RIGGED SEQUENCE ----------------------------------------------------
+    // The wheel LOOKS random but always follows this fixed order, then loops.
+    // Bollywood is on the wheel for show but is never selected.
+    var SEQUENCE = [
+      { key: 'jhorror',   label: 'Japanese Horror' },
+      { key: 'superhero', label: 'Hollywood Superhero' },
+      { key: 'jhorror',   label: 'Japanese Horror' },
+      { key: 'romcom',    label: 'English Rom-com' }
+    ];
+    var IDX_KEY = 'fringe_roulette_idx';
+
+    function getIdx() {
+      var v = parseInt(localStorage.getItem(IDX_KEY), 10);
+      return (isNaN(v) || v < 0 || v >= SEQUENCE.length) ? 0 : v;
+    }
+    function setIdx(i) { localStorage.setItem(IDX_KEY, String(i % SEQUENCE.length)); }
+
+    // ---- wheel setup --------------------------------------------------------
     var wheel = document.getElementById('wheel');
     var spin = document.getElementById('spin');
     var result = document.getElementById('result');
     var rotation = 0;
 
-    // Place labels at each segment's center radius.
     ORDER.forEach(function (key, i) {
       var el = document.createElement('div');
       el.className = 'label';
-      el.textContent = LABELS[key].replace('\n', ' ');
-      var centerDeg = i * 90 + 45;            // clockwise from top
-      var rad = (centerDeg - 90) * Math.PI / 180; // CSS 0deg = 3 o'clock
-      var R = 0.30;                            // fraction of radius
+      el.textContent = LABELS[key];
+      var centerDeg = i * 90 + 45;
+      var rad = (centerDeg - 90) * Math.PI / 180;
+      var R = 0.30;
       el.style.transform = 'translate(' + (Math.cos(rad) * R * 100 - 20) + '%,' +
                                           (Math.sin(rad) * R * 100 - 0.6) + 'em) ';
       document.querySelector('.wrap').appendChild(el);
@@ -78,18 +105,56 @@
     spin.addEventListener('click', function () {
       spin.disabled = true;
       result.textContent = '';
-      var g = VoteAPI.pickGenre();            // also records the pick server-side
+
+      // Next genre comes from the rigged sequence, not from chance.
+      var idx = getIdx();
+      var g = SEQUENCE[idx];
+      setIdx(idx + 1);
+      renderDebug();
+
+      // Land on that genre's wheel segment, but with random turns + a random
+      // offset inside the segment so each spin looks organic (not mechanical).
       var i = ORDER.indexOf(g.key);
-      // Land segment i's center under the top pointer: rot ≡ -(i*90+45) (mod 360), + full turns.
-      var target = 360 * 5 - (i * 90 + 45);
-      // advance from current rotation to the next multiple that ends at `target mod 360`
+      var turns = 4 + Math.floor(Math.random() * 3);      // 4–6 full spins
+      var jitter = Math.random() * 60 - 30;               // ±30° within the 90° wedge
+      var target = turns * 360 - (i * 90 + 45) - jitter;
       rotation = Math.ceil(rotation / 360) * 360 + target;
       wheel.style.transform = 'rotate(' + rotation + 'deg)';
+
+      // Best-effort: record the pick server-side (optional; ignored if offline).
+      try {
+        fetch(VoteAPI.API_BASE + 'genre.php', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ genre: g.key })
+        }).catch(function () {});
+      } catch (e) {}
+
       setTimeout(function () {
         result.textContent = g.label;
         spin.disabled = false;
       }, 5100);
     });
+
+    // ---- debug panel (?debug=1) --------------------------------------------
+    var debugEl = document.getElementById('debug');
+    var DEBUG_ON = /[?&]debug=1/.test(location.search);
+
+    function renderDebug() {
+      if (!DEBUG_ON) return;
+      var idx = getIdx();
+      var items = SEQUENCE.map(function (s, i) {
+        return '<li class="' + (i === idx ? 'now' : '') + '">' + s.label + '</li>';
+      }).join('');
+      debugEl.innerHTML =
+        '<h2>Rigged sequence — debug (not visible without ?debug=1)</h2>' +
+        '<ol>' + items + '</ol>' +
+        '<button id="reset-seq">Reset to start (Japanese Horror)</button>';
+      document.getElementById('reset-seq').addEventListener('click', function () {
+        setIdx(0); renderDebug();
+      });
+    }
+
+    if (DEBUG_ON) { debugEl.hidden = false; renderDebug(); }
   </script>
 </body>
 </html>

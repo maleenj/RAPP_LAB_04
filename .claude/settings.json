@@ -29,7 +29,8 @@
       "Bash(docker rm *)",
       "Bash(docker run *)",
       "Bash(docker exec *)",
-      "Bash(curl -s __TRACKED_VAR__/api/state.php?window=2)"
+      "Bash(curl -s __TRACKED_VAR__/api/state.php?window=2)",
+      "Bash(cd /tmp && python3 -c \"import py_compile; py_compile.compile\\('/home/maleen/git/RAPP_LAB_04/ros2_ws/src/vam_inference/vam_inference/vam_pvt_streamer_new2.py', cfile='/tmp/_chk.pyc', doraise=True\\); print\\('OK — compiles clean'\\)\" && grep -n \"traverse_enter\\\\|_traverse_enter\" /home/maleen/git/RAPP_LAB_04/ros2_ws/src/vam_inference/vam_inference/vam_pvt_streamer_new2.py || echo \"no stray traverse_enter refs\")"
     ]
   }
 }

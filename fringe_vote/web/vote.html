@@ -29,9 +29,21 @@
     .sub { font-size: .85rem; font-weight: 500; opacity: .8; display: block; margin-top: 6px; }
     #tally { text-align: center; font-size: .95rem; opacity: .85; min-height: 1.4em; }
     .hint { text-align: center; font-size: .75rem; opacity: .5; }
+    .project-banner {
+      display: flex; align-items: center; justify-content: center; gap: 10px;
+      text-decoration: none; color: #f2f2f7;
+      background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14);
+      border-radius: 14px; padding: 12px 16px; font-size: .95rem; font-weight: 600;
+    }
+    .project-banner .arrow { font-weight: 800; opacity: .8; }
+    .project-banner:active { background: rgba(255,255,255,.12); }
   </style>
 </head>
 <body>
+  <a class="project-banner" href="https://rapp-lab.roboticart.org/" target="_blank" rel="noopener">
+    <span>Find out more about our project</span>
+    <span class="arrow">&#8599;</span>
+  </a>
   <h1>Tap to steer the robot</h1>
   <div class="buttons">
     <button id="btn-mirror" class="vote">MIRROR<span class="sub">move with the performer</span></button>
