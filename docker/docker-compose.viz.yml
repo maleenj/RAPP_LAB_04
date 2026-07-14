@@ -15,6 +15,9 @@ name: rapp-viz
 
 services:
   viz:
+    # Published image — `docker compose -f docker-compose.viz.yml pull` for users.
+    # The build: block below still works for developers modifying the image.
+    image: ghcr.io/collaborativeroboticslab/enact-viz:${ENACT_TAG:-latest}
     build:
       context: ./viz
       dockerfile: Dockerfile

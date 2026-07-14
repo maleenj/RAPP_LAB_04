@@ -14,7 +14,10 @@ name: rapp-hw
 
 services:
   hw:
-    image: zed_ros2_desktop_u22.04_sdk_5.1.0_cuda_12.1.1:latest
+    # Published image (hand-built; see hw/PROVENANCE.md). Private on GHCR
+    # until ZED SDK redistribution is confirmed — request access, or build
+    # from legacy/docker_zed as a starting point.
+    image: ghcr.io/collaborativeroboticslab/enact-hw:${ENACT_TAG:-latest}
     container_name: rapp_hw
     hostname: hw-container
     network_mode: host

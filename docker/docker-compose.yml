@@ -11,6 +11,9 @@ name: rapp-vam
 
 services:
   vam:
+    # Published image — `docker compose pull vam` for users.
+    # The build: block below still works for developers modifying the image.
+    image: ghcr.io/collaborativeroboticslab/enact-vam:${ENACT_TAG:-latest}
     build:
       context: ./vam
       dockerfile: Dockerfile
