@@ -1,6 +1,6 @@
 cff-version: 1.2.0
 message: "If you use ENACT in your research, please cite it as below."
-title: "ENACT: Embodied Neural Action Translation"
+title: "ENACT: Embodied Neural Action Chunking Transformer"
 type: software
 authors:
   - family-names: Jayasuriya

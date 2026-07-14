@@ -1,4 +1,4 @@
-# ENACT — Embodied Neural Action Translation
+# ENACT — Embodied Neural Action Chunking Transformer
 
 ENACT is a Vision-Action Model (VAM) system that lets an industrial robot arm
 perform live with human actors. A ZED stereo camera tracks a performer's
