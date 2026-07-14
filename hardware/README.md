@@ -1,6 +1,8 @@
-# RAPP Lab 04: TM12S Robot Operation Guide
+# ENACT Hardware — TM12S Robot Operation Guide
 
-TM12S deployment of the Vision-Action Model (VAM) pipeline. Uses skeleton-only models trained on native TM12S data with direct PVT streaming to the robot firmware.
+TM12S deployment of the ENACT Vision-Action Model (VAM) pipeline. Uses skeleton-only models trained on native TM12S data with direct PVT streaming to the robot firmware.
+
+Part of [ENACT](../README.md) · training pipeline: [vam/](../vam/README.md) · visualization: [viz/](../viz/README.md)
 
 **Important:** Only run one robot at a time. Stop UR10 containers before starting TM12S, and vice versa. All services use ROS_DOMAIN_ID=0.
 
@@ -26,12 +28,14 @@ Both containers share the same volumes:
 |---|---|---|
 | `ros2_ws/` | `/workspace/ros2_ws` | VAM inference ROS2 package |
 | `vam/vam_utils/` | `/workspace/vam_utils` | Shared utilities |
-| `notebooks/` | `/workspace/notebooks` | Jupyter notebooks |
+| `vam/notebooks/` | `/workspace/notebooks_tm` | Jupyter notebooks |
 | `scripts/` | `/workspace/scripts` | Helper scripts |
 | `config/` | `/config` | Configuration files |
-| `~/rosbags/rapplab04` | `/data/rosbags` | Rosbag recordings |
-| `~/csvdata/rapplab04` | `/data/processed` | Processed data, URDFs, RViz configs |
-| `~/models/rapplab04` | `/data/models` | Trained models |
+| `~/enact_local/rosbags` | `/data/rosbags` | Rosbag recordings |
+| `~/enact_local/csvdata` | `/data/processed` | Processed data, URDFs, RViz configs |
+| `~/enact_local/models` | `/data/models` | Trained models |
+
+(Data root is `ENACT_DATA` in `docker/.env`; `~/enact_local` is the default.)
 
 The hardware container also auto-mounts the servo and controller configs into the TM2 install tree.
 
@@ -337,7 +341,7 @@ ros2 launch vam_inference vam_tm12s_robot.launch.py \
 | File | Purpose |
 |---|---|
 | `ros2_ws/src/vam_inference/config/vam_models.yaml` | Model registry (model dirs + norm stats paths) |
-| `ros2_ws/src/vam_inference/vam_inference/vam_pvt_streamer.py` | PVT streamer node |
+| `ros2_ws/src/vam_inference/vam_inference/vam_pvt_streamer_new2.py` | PVT streamer node (the `vam_pvt_streamer` command runs this module; earlier iterations are archived in `legacy/experiments/`) |
 | `ros2_ws/src/vam_inference/vam_inference/vam_tm12s_node.py` | VAM inference node |
 | `ros2_ws/src/vam_interfaces/srv/SwitchModel.srv` | Model switch service definition |
 | `vam/vam_utils/data/robot_configs.py` | TM12S joint names, limits, velocities |

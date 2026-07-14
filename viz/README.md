@@ -1,13 +1,20 @@
-# README_viz — Live Visualization Streaming (ENACT → Unity/Unreal)
+# ENACT Viz — Live Visualization Streaming (ENACT → Unity/Unreal)
 
 Everything for streaming the robot's live data (joint angles now; neural-net
 internals later) over WiFi to **Unity, Unreal, or a browser**, plus **recording**
 datasets and letting **students replay them offline without ROS or the robot**.
 
+Part of [ENACT](../README.md) · robot operation: [hardware/](../hardware/README.md)
+
 This is the master guide. Component-level docs:
-- `ros2_ws/src/vam_viz_bridge/README.md` — the bridge package in depth
+- `../ros2_ws/src/vam_viz_bridge/README.md` — the bridge package in depth
 - `student_pack/README.md` — the hand-to-students bundle
 - `student_pack/unity/README.md` — Unity step-by-step
+- `fringe_vote/README.md` — the audience voting web app (model hot-swap by crowd vote)
+
+Note on the two browser viewers: `../ros2_ws/src/vam_viz_bridge/web/index.html`
+is the developer test page; `student_pack/web/index.html` is the student-facing
+viewer with day-1 instructions. They are intentionally different pages.
 
 ---
 
