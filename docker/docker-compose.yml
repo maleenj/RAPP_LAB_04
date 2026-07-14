@@ -49,11 +49,12 @@ services:
       # Configuration
       - ../config:/config:ro
 
-      # Data volumes
-      - /home/maleen/rosbags/rapplab04:/data/rosbags:rw
-      - /home/maleen/csvdata/rapplab04:/data/processed:rw
-      - /home/maleen/models/rapplab04:/data/models:rw
-      - /home/maleen/models/rapplab04/logs:/data/logs:rw
+      # Data volumes — one host root, set ENACT_DATA in docker/.env
+      # (defaults to ~/enact_local; see .env.example)
+      - ${ENACT_DATA:-${HOME}/enact_local}/rosbags:/data/rosbags:rw
+      - ${ENACT_DATA:-${HOME}/enact_local}/csvdata:/data/processed:rw
+      - ${ENACT_DATA:-${HOME}/enact_local}/models:/data/models:rw
+      - ${ENACT_DATA:-${HOME}/enact_local}/logs:/data/logs:rw
 
       # X11 for GUI (matplotlib, etc.)
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
