@@ -1,1 +1,0 @@
-/ws/ros2_ws/build_viz/vam_viz_bridge/launch/viz_bridge.launch.py
