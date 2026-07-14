@@ -5,44 +5,150 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Results Backdrop</title>
   <style>
-    /* Plain functional backdrop. Claude Design restyles this; keep using
-       VoteAPI.onState() / VoteAPI.getRatio(). ratio: 0 = all mirror, 1 = all contrast. */
-    html, body { height: 100%; margin: 0; overflow: hidden; background: #000; }
-    /* Two-tone gradient. We shift the gradient stops + luminance with the vote ratio. */
+    /* ============================================================
+       GENRE ROULETTE — performance backdrop.
+       #stage carries the vote-driven gradient (blue MIRROR ->
+       amber CONTRAST), set inline by the untouched script and
+       eased with a slow transition. CSS adds hypnotic idle drift,
+       grain and a projector vignette on top. IDs kept: #stage #readout.
+       ============================================================ */
+    html, body { height: 100%; margin: 0; overflow: hidden; background: #0d0b09; }
+
+    /* Vote-driven two-tone gradient. Stops + luminance shift with the ratio. */
     #stage {
-      position: fixed; inset: 0;
-      transition: background 1.2s linear;
-      background: linear-gradient(120deg, #0b3d91 0%, #b45309 100%);
+      position: fixed; inset: 0; z-index: 0;
+      transition: background 1.6s linear;
+      background: linear-gradient(120deg, #2E6B7E 0%, #E85A1A 100%);
     }
+
+    /* Slow breathing light pools — cool frost vs warm candle. Screen-blended so
+       they lift the leading side without hiding the vote colour. Idle motion only. */
+    .aurora {
+      position: fixed; inset: -20%; z-index: 1; pointer-events: none;
+      mix-blend-mode: screen; opacity: .5;
+      background:
+        radial-gradient(38% 46% at 30% 34%, rgba(220,233,236,.55), transparent 70%),
+        radial-gradient(42% 50% at 72% 66%, rgba(255,208,138,.5), transparent 72%);
+      animation: drift 46s ease-in-out infinite alternate;
+    }
+    .aurora.two {
+      opacity: .32;
+      background:
+        radial-gradient(34% 40% at 66% 28%, rgba(79,163,188,.5), transparent 70%),
+        radial-gradient(40% 46% at 26% 74%, rgba(255,138,61,.42), transparent 72%);
+      animation: drift2 62s ease-in-out infinite alternate;
+    }
+    @keyframes drift {
+      0%   { transform: translate3d(-4%, -3%, 0) scale(1.05); }
+      100% { transform: translate3d(5%, 4%, 0) scale(1.18); }
+    }
+    @keyframes drift2 {
+      0%   { transform: translate3d(4%, 3%, 0) scale(1.12) rotate(0deg); }
+      100% { transform: translate3d(-5%, -4%, 0) scale(1.0) rotate(6deg); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .aurora, .aurora.two { animation: none; }
+    }
+
+    /* projector vignette — edges fall to warm carbon, never pure black */
+    .vignette {
+      position: fixed; inset: 0; z-index: 2; pointer-events: none;
+      background: radial-gradient(120% 120% at 50% 46%, transparent 52%, rgba(13,11,9,.55) 88%, rgba(13,11,9,.85) 100%);
+    }
+
+    /* film grain */
+    .grain {
+      position: fixed; inset: 0; z-index: 3; pointer-events: none;
+      mix-blend-mode: screen; opacity: .08;
+      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='400' height='400'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.95 0 0 0 0 0.89 0 0 0 0 0.78 0 0 0 0.10 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+    }
+
+    /* Centre scoreboard — big, legible from the back of the room, reinforces
+       the two colours the audience learned on their phones. */
     #readout {
-      position: fixed; left: 50%; bottom: 5vh; transform: translateX(-50%);
-      font-family: system-ui, sans-serif; color: rgba(255,255,255,.55);
-      font-size: 1.4vw; letter-spacing: .15em; text-transform: uppercase;
-      mix-blend-mode: overlay; white-space: nowrap;
+      position: fixed; inset: 0; z-index: 4;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 2.2vh; pointer-events: none;
+      font-family: 'Haettenschweiler', 'Arial Narrow Bold', 'Franklin Gothic Bold', Impact, sans-serif;
+    }
+    #readout .tote {
+      display: flex; align-items: center; justify-content: center; gap: clamp(24px, 6vw, 96px);
+    }
+    #readout .side { display: flex; flex-direction: column; align-items: center; gap: .4vh; }
+    #readout .num {
+      font-size: clamp(4rem, 20vw, 22rem); line-height: .8;
+      letter-spacing: -.01em; color: var(--paper, #ECE3D0);
+      text-shadow: 0 4px 30px rgba(13,11,9,.55), 0 0 8px rgba(13,11,9,.35);
+      transition: opacity 1.2s ease, transform 1.2s ease;
+    }
+    #readout .lab {
+      font-family: ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
+      font-size: clamp(.7rem, 1.7vw, 1.4rem); letter-spacing: .34em; text-transform: uppercase;
+      text-shadow: 0 2px 12px rgba(13,11,9,.6);
+    }
+    #readout .mirror .lab   { color: #DCE9EC; }
+    #readout .contrast .lab { color: #FFD08A; }
+    #readout .sep {
+      font-size: clamp(2rem, 7vw, 8rem); line-height: .8; color: rgba(236,227,208,.4);
+      text-shadow: 0 2px 12px rgba(13,11,9,.5);
+    }
+    /* the leading side asserts itself; the trailing side recedes */
+    #readout .side { opacity: .55; transform: scale(.92); }
+    #readout .side.lead { opacity: 1; transform: scale(1); }
+    #readout .sub {
+      font-family: ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
+      font-size: clamp(.6rem, 1.3vw, 1rem); letter-spacing: .3em; text-transform: uppercase;
+      color: rgba(236,227,208,.72); text-shadow: 0 2px 10px rgba(13,11,9,.6);
     }
   </style>
 </head>
 <body>
   <div id="stage"></div>
-  <div id="readout">&nbsp;</div>
+  <div class="aurora" aria-hidden="true"></div>
+  <div class="aurora two" aria-hidden="true"></div>
+  <div class="vignette" aria-hidden="true"></div>
+  <div class="grain" aria-hidden="true"></div>
+  <div id="readout">
+    <div class="tote">
+      <div class="side mirror" id="ro-side-mirror">
+        <span class="num" id="ro-mirror">0</span>
+        <span class="lab">Mirror</span>
+      </div>
+      <div class="sep">/</div>
+      <div class="side contrast" id="ro-side-contrast">
+        <span class="num" id="ro-contrast">0</span>
+        <span class="lab">Contrast</span>
+      </div>
+    </div>
+    <div class="sub" id="ro-sub">&nbsp;</div>
+  </div>
 
   <script src="vote-api.js"></script>
   <script>
     var stage = document.getElementById('stage');
-    var readout = document.getElementById('readout');
+    var roMirror = document.getElementById('ro-mirror');
+    var roContrast = document.getElementById('ro-contrast');
+    var roSideMirror = document.getElementById('ro-side-mirror');
+    var roSideContrast = document.getElementById('ro-side-contrast');
+    var roSub = document.getElementById('ro-sub');
 
-    // Mirror end (cool/blue) vs Contrast end (warm/amber).
-    // As ratio -> 1 (contrast wins), the warm side grows and brightens;
-    // as ratio -> 0 (mirror wins), the cool side grows and brightens.
+    // Mirror end (cool teal/blue) vs Contrast end (warm orange), Mush ramps.
+    // As ratio -> 1 (contrast wins), the warm side grows and brightens toward
+    // Candle; as ratio -> 0 (mirror wins), the cool side grows toward Frost.
     function render(ratio) {
       var r = Math.max(0, Math.min(1, ratio));
-      // luminance: whichever side leads gets brighter (max lift at the extremes).
-      var mirrorL = 30 + (1 - r) * 35;   // %
-      var contrastL = 30 + r * 35;       // %
-      var mirrorCol = 'hsl(217, 80%, ' + mirrorL.toFixed(1) + '%)';
-      var contrastCol = 'hsl(33, 90%, ' + contrastL.toFixed(1) + '%)';
-      // gradient midpoint slides toward the losing side so the winner fills more screen.
-      var mid = (r * 100).toFixed(1);
+      // MIRROR: blue/teal. Void (~34%L) when losing -> Frost-lit (~66%L) when winning.
+      var mirrorL = 32 + (1 - r) * 34;
+      var mirrorS = 40 + (1 - r) * 14;
+      var mirrorCol = 'hsl(196, ' + mirrorS.toFixed(1) + '%, ' + mirrorL.toFixed(1) + '%)';
+      // CONTRAST: orange. Coal (~30%L) when losing -> Candle (~64%L) when winning,
+      // hue drifting saffron-ward (18 -> 30) as it heats up.
+      var contrastL = 30 + r * 34;
+      var contrastH = 18 + r * 12;
+      var contrastCol = 'hsl(' + contrastH.toFixed(1) + ', 88%, ' + contrastL.toFixed(1) + '%)';
+      // gradient boundary slides toward the LOSING side so the winner fills more
+      // screen: r->1 (contrast wins) pushes the split left; r->0 pushes it right.
+      var mid = ((1 - r) * 100).toFixed(1);
       stage.style.background =
         'linear-gradient(120deg, ' + mirrorCol + ' 0%, ' + mirrorCol + ' ' +
         Math.max(0, mid - 25).toFixed(1) + '%, ' + contrastCol + ' ' +
@@ -52,9 +158,12 @@
     VoteAPI.onState(function (s) {
       var r = (s && typeof s.ratio === 'number') ? s.ratio : 0.5;
       render(r);
-      if (s && typeof s.active === 'number') {
-        readout.textContent = (s.winner && s.winner !== 'none' ? s.winner : '—') +
-          '   ·   ' + s.mirror + ' / ' + s.contrast;
+      if (s && typeof s.mirror === 'number') {
+        roMirror.textContent = s.mirror;
+        roContrast.textContent = s.contrast;
+        roSideMirror.classList.toggle('lead', s.mirror > s.contrast);
+        roSideContrast.classList.toggle('lead', s.contrast > s.mirror);
+        roSub.textContent = (s.active || 0) + ' voting';
       }
     }, 1000);
 

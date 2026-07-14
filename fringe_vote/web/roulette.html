@@ -5,57 +5,194 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Genre Roulette</title>
   <style>
-    :root { color-scheme: dark; }
-    html, body { height: 100%; margin: 0; background: radial-gradient(circle at 50% 30%, #1a1a2e, #07070c); }
-    body { font-family: system-ui, sans-serif; color: #fff; display: flex; flex-direction: column;
-           align-items: center; justify-content: center; gap: 28px; }
-    h1 { font-weight: 600; letter-spacing: .12em; text-transform: uppercase; opacity: .8; }
-    .wrap { position: relative; width: min(70vmin, 560px); aspect-ratio: 1; }
-    .pointer {
-      position: absolute; top: -10px; left: 50%; transform: translateX(-50%);
-      width: 0; height: 0; border-left: 18px solid transparent; border-right: 18px solid transparent;
-      border-top: 28px solid #fff; z-index: 3; filter: drop-shadow(0 2px 4px rgba(0,0,0,.6));
+    /* ============================================================
+       GENRE ROULETTE — projected wheel. RESTYLE ONLY.
+       Geometry is load-bearing: #wheel stays a conic-gradient of
+       four equal 90deg wedges (superhero, jhorror, romcom,
+       bollywood from 12 o'clock) driven by transform:rotate + the
+       5s transition. Colours / type / labels restyled. JS untouched.
+       ============================================================ */
+    :root {
+      color-scheme: dark;
+      --ink:        #1A1715;
+      --ink-2:      #221E1B;
+      --paper:      #ECE3D0;
+      --paper-mute: #BFB39C;
+
+      --superhero: #E85A1A;   /* orange  — heroic heat      */
+      --jhorror:   #22617A;   /* teal    — cold dread        */
+      --romcom:    #E1A61C;   /* gold    — warm naturalism   */
+      --bollywood: #B23A79;   /* magenta — spectacle         */
+
+      --gold:   #FFD08A;
+      --frost:  #DCE9EC;
+
+      --display: 'Haettenschweiler', 'Arial Narrow Bold', 'Franklin Gothic Bold', Impact, sans-serif;
+      --mono: ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
     }
+    html, body {
+      height: 100%; margin: 0;
+      background:
+        radial-gradient(ellipse at 72% 18%, rgba(232,90,26,.14), transparent 48%),
+        radial-gradient(ellipse at 22% 82%, rgba(46,107,126,.28), transparent 52%),
+        radial-gradient(circle at 50% 34%, #201b17, #0d0b09 78%);
+    }
+    body {
+      font-family: var(--mono); color: var(--paper);
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: clamp(20px, 4vmin, 40px); min-height: 100vh;
+    }
+
+    /* film grain */
+    .grain {
+      position: fixed; inset: 0; z-index: 60; pointer-events: none;
+      mix-blend-mode: screen; opacity: .11;
+      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='400' height='400'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.95 0 0 0 0 0.89 0 0 0 0 0.78 0 0 0 0.10 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+    }
+
+    h1 {
+      font-family: var(--display); font-weight: 400;
+      font-size: clamp(2.2rem, 6.5vmin, 4.2rem); line-height: .9;
+      letter-spacing: .06em; text-transform: uppercase;
+      margin: 0; color: var(--paper);
+      text-shadow: 0 0 26px rgba(232,90,26,.35);
+    }
+    h1 .lede {
+      display: block; font-family: var(--mono);
+      font-size: clamp(.6rem, 1.5vmin, .82rem); letter-spacing: .42em;
+      color: var(--paper-mute); margin-bottom: .5em; text-align: center;
+    }
+
+    .wrap { position: relative; width: min(70vmin, 560px); aspect-ratio: 1; --wheel: min(70vmin, 560px); }
+
+    .pointer {
+      position: absolute; top: -14px; left: 50%; transform: translateX(-50%);
+      width: 0; height: 0;
+      border-left: 20px solid transparent; border-right: 20px solid transparent;
+      border-top: 34px solid var(--gold); z-index: 5;
+      filter: drop-shadow(0 3px 8px rgba(0,0,0,.7)) drop-shadow(0 0 12px rgba(255,208,138,.5));
+    }
+
     #wheel {
       width: 100%; height: 100%; border-radius: 50%;
-      border: 6px solid rgba(255,255,255,.15);
+      position: relative;
+      border: 10px solid var(--ink-2);
+      box-shadow:
+        0 0 0 2px rgba(236,227,208,.22),
+        0 0 0 12px #0d0b09,
+        0 30px 80px rgba(0,0,0,.6),
+        inset 0 0 60px rgba(0,0,0,.55);
       transition: transform 5s cubic-bezier(.17,.67,.16,.99);
-      /* 4 quadrants, 90deg each, starting at 12 o'clock */
+      /* 4 quadrants, 90deg each, starting at 12 o'clock — DO NOT change geometry */
       background: conic-gradient(
-        #1f6feb 0deg 90deg,    /* superhero */
-        #c026d3 90deg 180deg,  /* jhorror   */
-        #ec4899 180deg 270deg, /* romcom    */
-        #f59e0b 270deg 360deg  /* bollywood */
+        var(--superhero) 0deg 90deg,    /* superhero */
+        var(--jhorror)  90deg 180deg,   /* jhorror   */
+        var(--romcom)  180deg 270deg,   /* romcom    */
+        var(--bollywood) 270deg 360deg  /* bollywood */
       );
     }
-    .label { position: absolute; left: 50%; top: 50%; transform-origin: 0 0;
-             font-weight: 700; font-size: 1rem; width: 40%; text-align: center;
-             pointer-events: none; text-shadow: 0 1px 3px rgba(0,0,0,.7); }
-    #spin {
-      padding: 16px 40px; font-size: 1.3rem; font-weight: 800; letter-spacing: .05em;
-      color: #07070c; background: #fff; border: none; border-radius: 999px; cursor: pointer;
+    /* cream wedge dividers — rotate with the wheel */
+    #wheel::after {
+      content: ""; position: absolute; inset: 0; border-radius: 50%;
+      pointer-events: none;
+      background:
+        linear-gradient(90deg, transparent calc(50% - 1px), rgba(236,227,208,.5) calc(50% - 1px), rgba(236,227,208,.5) calc(50% + 1px), transparent calc(50% + 1px)),
+        linear-gradient(0deg,  transparent calc(50% - 1px), rgba(236,227,208,.5) calc(50% - 1px), rgba(236,227,208,.5) calc(50% + 1px), transparent calc(50% + 1px));
     }
-    #spin:disabled { opacity: .4; cursor: default; }
-    #result { min-height: 2.4rem; font-size: 1.8rem; font-weight: 800; text-align: center; }
+    /* centre hub */
+    #wheel::before {
+      content: ""; position: absolute; left: 50%; top: 50%;
+      width: 17%; height: 17%; transform: translate(-50%, -50%);
+      border-radius: 50%; z-index: 2;
+      background: radial-gradient(circle at 50% 35%, #2b241f, var(--ink));
+      border: 2px solid rgba(236,227,208,.45);
+      box-shadow: 0 0 22px rgba(0,0,0,.6), inset 0 0 14px rgba(0,0,0,.6);
+    }
 
-    /* Debug panel — only shown with ?debug=1 in the URL. Audience never sees this. */
-    #debug { position: fixed; top: 0; left: 0; right: 0; background: #10101a; color: #cdd;
-             border-bottom: 2px solid #303048; padding: 10px 16px; font-size: .9rem; z-index: 10; }
-    #debug h2 { margin: 0 0 6px; font-size: .8rem; letter-spacing: .1em; text-transform: uppercase; color: #f59e0b; }
-    #debug ol { margin: 4px 0; padding-left: 20px; }
-    #debug li.now { color: #fff; font-weight: 800; }
-    #debug li.now::after { content: '  ⟵ NEXT PRESS'; color: #f59e0b; font-weight: 700; }
-    #debug button { margin-top: 6px; padding: 6px 14px; border-radius: 6px; border: none;
-                    background: #f59e0b; color: #07070c; font-weight: 700; cursor: pointer; }
+    /* genre labels — the JS builds decorative .label overlays and (via a %/em
+       maths quirk) flings them off the wheel; they are not part of the landing
+       maths, so we hide them and paint our own labels INTO each wheel slot as
+       children of #wheel — they rotate with the wheel and stay matched to their
+       colour. JS is untouched. */
+    .wrap > .label { display: none !important; }
+
+    .slot {
+      position: absolute; left: 50%; top: 50%; width: 0; height: 0;
+      transform-origin: 0 0; z-index: 3; pointer-events: none;
+      transform: rotate(var(--a)) translate(0, calc(var(--wheel) * -0.30));
+    }
+    .slot-in {
+      position: absolute; left: 0; top: 0;
+      width: calc(var(--wheel) * 0.30);
+      transform: translate(-50%, -50%) rotate(calc(var(--a) * -1));
+      text-align: center;
+      text-shadow: 0 1px 3px rgba(20,15,10,.9), 0 0 14px rgba(20,15,10,.6);
+    }
+    .slot-in .g {
+      display: block; font-family: var(--display); font-weight: 400;
+      font-size: clamp(1rem, 3vmin, 1.7rem); line-height: .9;
+      letter-spacing: .02em; text-transform: uppercase; color: var(--paper);
+    }
+    .slot-in .s {
+      display: block; margin-top: .55em;
+      font-family: var(--mono); font-size: clamp(.5rem, 1.25vmin, .72rem);
+      letter-spacing: .1em; text-transform: uppercase; color: rgba(236,227,208,.92);
+    }
+
+    #spin {
+      font-family: var(--display); font-weight: 400;
+      padding: 16px 56px; font-size: clamp(1.4rem, 3.2vmin, 2.1rem);
+      letter-spacing: .12em; text-transform: uppercase;
+      color: var(--ink);
+      background: linear-gradient(180deg, var(--gold), var(--superhero) 80%);
+      border: none; border-radius: 999px; cursor: pointer;
+      box-shadow: 0 8px 30px rgba(232,90,26,.45), inset 0 1px 0 rgba(255,255,255,.4);
+      transition: transform .12s ease, box-shadow .3s ease, filter .3s ease;
+    }
+    #spin:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 12px 40px rgba(232,90,26,.6), inset 0 1px 0 rgba(255,255,255,.4); }
+    #spin:active:not(:disabled) { transform: translateY(0); }
+    #spin:disabled { opacity: .32; cursor: default; filter: grayscale(.4); }
+
+    #result {
+      min-height: 2.6rem; text-align: center;
+      font-family: var(--display); font-weight: 400;
+      font-size: clamp(1.8rem, 5vmin, 3.4rem); line-height: 1;
+      letter-spacing: .03em; text-transform: uppercase; color: var(--gold);
+      text-shadow: 0 0 30px rgba(255,208,138,.4);
+    }
+
+    /* Debug panel — only shown with ?debug=1. Audience never sees this. */
+    #debug {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 10;
+      background: var(--ink); color: var(--paper);
+      border-bottom: 2px solid #3A332E; padding: 10px 16px;
+      font-family: var(--mono); font-size: .78rem;
+    }
+    #debug h2 { margin: 0 0 6px; font-size: .64rem; letter-spacing: .18em; text-transform: uppercase; color: var(--superhero); }
+    #debug ol { margin: 4px 0; padding-left: 22px; }
+    #debug li { letter-spacing: .04em; }
+    #debug li.now { color: var(--gold); font-weight: 700; }
+    #debug li.now::after { content: '  ⟵ NEXT PRESS'; color: var(--superhero); font-weight: 700; }
+    #debug button {
+      margin-top: 8px; padding: 7px 14px; border-radius: 6px; border: none;
+      font-family: var(--mono); letter-spacing: .06em;
+      background: var(--superhero); color: var(--ink); font-weight: 700; cursor: pointer;
+    }
   </style>
 </head>
 <body>
+  <div class="grain" aria-hidden="true"></div>
   <div id="debug" hidden></div>
 
-  <h1>Genre Roulette</h1>
+  <h1><span class="lede">Genre</span>Roulette</h1>
   <div class="wrap">
     <div class="pointer"></div>
-    <div id="wheel"></div>
+    <div id="wheel">
+      <div class="slot" style="--a: 45deg;"><div class="slot-in"><span class="g">Hollywood<br>Superhero</span><span class="s">Meyerhold biomechanics · Lecoq</span></div></div>
+      <div class="slot" style="--a: 135deg;"><div class="slot-in"><span class="g">Japanese<br>Horror</span><span class="s">Butoh · Suzuki</span></div></div>
+      <div class="slot" style="--a: 225deg;"><div class="slot-in"><span class="g">English<br>Rom-com</span><span class="s">Naturalism · Lecoq</span></div></div>
+      <div class="slot" style="--a: 315deg;"><div class="slot-in"><span class="g">Bollywood<br>Musical</span><span class="s">Bollywood</span></div></div>
+    </div>
   </div>
   <button id="spin">SPIN</button>
   <div id="result">&nbsp;</div>
