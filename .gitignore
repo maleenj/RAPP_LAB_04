@@ -83,9 +83,11 @@ mlruns/
 # ============================================================================
 # ROS2
 # ============================================================================
-ros2_ws/build/
-ros2_ws/install/
-ros2_ws/log/
+# build*/install*/log* covers the parallel viz workspace (build_viz, install_viz)
+# and the hw-side build dirs as well as the standard colcon dirs
+ros2_ws/build*/
+ros2_ws/install*/
+ros2_ws/log*/
 *.pyc
 
 # ============================================================================
@@ -125,3 +127,12 @@ config/calibration.yaml
 
 # User-specific paths (use .env.example as template)
 .env
+
+# Claude Code local settings
+.claude/
+
+# Notebook HTML exports (the .ipynb is the source of truth)
+notebooks_tm/*.html
+notebooks_ur/*.html
+vam/notebooks/*.html
+legacy/notebooks_ur/*.html

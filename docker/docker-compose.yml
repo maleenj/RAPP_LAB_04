@@ -11,6 +11,9 @@ name: rapp-vam
 
 services:
   vam:
+    # Published image — `docker compose pull vam` for users.
+    # The build: block below still works for developers modifying the image.
+    image: ghcr.io/collaborativeroboticslab/enact-vam:${ENACT_TAG:-latest}
     build:
       context: ./vam
       dockerfile: Dockerfile
@@ -40,20 +43,22 @@ services:
       - ./vam/entrypoint.sh:/entrypoint_vam.sh:ro
 
       # Code directories (development mode — editable)
-      - ../vam_utils:/workspace/vam_utils:rw
-      - ../notebooks_ur:/workspace/notebooks_ur:rw
-      - ../notebooks_tm:/workspace/notebooks_tm:rw
+      # NOTE: container-side paths are unchanged from the pre-reorg layout
+      - ../vam/vam_utils:/workspace/vam_utils:rw
+      - ../legacy/notebooks_ur:/workspace/notebooks_ur:rw
+      - ../vam/notebooks:/workspace/notebooks_tm:rw
       - ../ros2_ws:/workspace/ros2_ws:rw
       - ../scripts:/workspace/scripts:rw
 
       # Configuration
       - ../config:/config:ro
 
-      # Data volumes
-      - /home/maleen/rosbags/rapplab04:/data/rosbags:rw
-      - /home/maleen/csvdata/rapplab04:/data/processed:rw
-      - /home/maleen/models/rapplab04:/data/models:rw
-      - /home/maleen/models/rapplab04/logs:/data/logs:rw
+      # Data volumes — one host root, set ENACT_DATA in docker/.env
+      # (defaults to ~/enact_local; see .env.example)
+      - ${ENACT_DATA:-${HOME}/enact_local}/rosbags:/data/rosbags:rw
+      - ${ENACT_DATA:-${HOME}/enact_local}/csvdata:/data/processed:rw
+      - ${ENACT_DATA:-${HOME}/enact_local}/models:/data/models:rw
+      - ${ENACT_DATA:-${HOME}/enact_local}/logs:/data/logs:rw
 
       # X11 for GUI (matplotlib, etc.)
       - /tmp/.X11-unix:/tmp/.X11-unix:rw

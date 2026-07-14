@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+message: "If you use ENACT in your research, please cite it as below."
+title: "ENACT: Embodied Neural Action Translation"
+type: software
+authors:
+  - family-names: Jayasuriya
+    given-names: Maleen
+    affiliation: "Collaborative Robotics Lab, University of Canberra"
+version: 1.0.0
+date-released: 2026-07-14
+repository-code: "https://github.com/collaborativeroboticslab/enact"
+license: Apache-2.0
+keywords:
+  - vision-action model
+  - action chunking transformer
+  - human-robot interaction
+  - robotic performance
+  - imitation learning
+# When the accompanying paper is published, add a preferred-citation block
+# here with the venue details.

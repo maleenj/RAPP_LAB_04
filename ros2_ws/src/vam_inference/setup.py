@@ -18,24 +18,19 @@ setup(
     zip_safe=True,
     maintainer='Maleen',
     maintainer_email='maleen@rapplab.org',
-    description='Vision-Action Model inference node for UR10 robot mirroring',
-    license='MIT',
+    description='ENACT Vision-Action Model inference for the TM12S robot',
+    license='Apache-2.0',
     entry_points={
         'console_scripts': [
-            'vam_inference_node = vam_inference.vam_node:main',
             'vam_tm12s_node = vam_inference.vam_tm12s_node:main',
             'vam_tm12s_node_viz = vam_inference.vam_tm12s_node_viz:main',
             'skeleton_relay = vam_inference.skeleton_relay:main',
-            'servo_to_tm_vjog_bridge = vam_inference.servo_to_tm_vjog_bridge:main',
             'servo_to_tm_pvt_bridge = vam_inference.servo_to_tm_pvt_bridge:main',
-            'servo_to_tm_ptp_bridge = vam_inference.servo_to_tm_ptp_bridge:main',
-            'vam_pvt_streamer = vam_inference.vam_pvt_streamer:main',
-            'vam_pvt_streamer_new = vam_inference.vam_pvt_streamer_new:main',
+            # vam_pvt_streamer and vam_pvt_streamer_new2 are the SAME program:
+            # the module keeps its historical filename, the clean name is the
+            # documented command. Superseded variants live in legacy/experiments/.
+            'vam_pvt_streamer = vam_inference.vam_pvt_streamer_new2:main',
             'vam_pvt_streamer_new2 = vam_inference.vam_pvt_streamer_new2:main',
-            'vam_pvt_streamer_new3 = vam_inference.vam_pvt_streamer_new3:main',
-            'vam_pvt_streamer_new_fix = vam_inference.vam_pvt_streamer_new_fix:main',
-            'vam_tm12s_node_diag = vam_inference.vam_tm12s_node_diag:main',
-            'vam_pvt_streamer_diag = vam_inference.vam_pvt_streamer_diag:main',
         ],
     },
 )

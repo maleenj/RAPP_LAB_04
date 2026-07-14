@@ -14,7 +14,10 @@ name: rapp-hw
 
 services:
   hw:
-    image: zed_ros2_desktop_u22.04_sdk_5.1.0_cuda_12.1.1:latest
+    # Published image (hand-built; see hw/PROVENANCE.md). Private on GHCR
+    # until ZED SDK redistribution is confirmed — request access, or build
+    # from legacy/docker_zed as a starting point.
+    image: ghcr.io/collaborativeroboticslab/enact-hw:${ENACT_TAG:-latest}
     container_name: rapp_hw
     hostname: hw-container
     network_mode: host
@@ -48,20 +51,22 @@ services:
       - ./hw/urdf_override/tm12s.srdf:/tm2_ws/install/tm12s_moveit_config/share/tm12s_moveit_config/config/tm12s.srdf:ro
 
       # Code directories (development mode)
-      - ../vam_utils:/workspace/vam_utils:rw
-      - ../notebooks_ur:/workspace/notebooks_ur:rw
-      - ../notebooks_tm:/workspace/notebooks_tm:rw
+      # NOTE: container-side paths are unchanged from the pre-reorg layout
+      - ../vam/vam_utils:/workspace/vam_utils:rw
+      - ../legacy/notebooks_ur:/workspace/notebooks_ur:rw
+      - ../vam/notebooks:/workspace/notebooks_tm:rw
       - ../ros2_ws:/workspace/ros2_ws:rw
       - ../scripts:/workspace/scripts:rw
 
       # Configuration
       - ../config:/config:ro
 
-      # Data volumes
-      - /home/maleen/rosbags/rapplab04:/data/rosbags:rw
-      - /home/maleen/csvdata/rapplab04:/data/processed:rw
-      - /home/maleen/models/rapplab04:/data/models:rw
-      - /home/maleen/models/rapplab04/logs:/data/logs:rw
+      # Data volumes — one host root, set ENACT_DATA in docker/.env
+      # (defaults to ~/enact_local; see .env.example)
+      - ${ENACT_DATA:-${HOME}/enact_local}/rosbags:/data/rosbags:rw
+      - ${ENACT_DATA:-${HOME}/enact_local}/csvdata:/data/processed:rw
+      - ${ENACT_DATA:-${HOME}/enact_local}/models:/data/models:rw
+      - ${ENACT_DATA:-${HOME}/enact_local}/logs:/data/logs:rw
 
       # ZED SDK cache (calibration files + optimized AI models)
       - zed_calibration:/usr/local/zed/settings:rw

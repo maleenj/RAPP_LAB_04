@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>Vote — Mirror or Contrast</title>
+  <style>
+    /* ============================================================
+       GENRE ROULETTE — voter (mobile, one hand, dark theatre)
+       Palette locked to the backdrop so the crowd learns it:
+       MIRROR = cool blue/teal · CONTRAST = warm amber/orange.
+       Restyle only. Keep ids #btn-mirror #btn-contrast #tally.
+       ============================================================ */
+    :root {
+      color-scheme: dark;
+      --ink:        #1A1715;
+      --ink-2:      #221E1B;
+      --paper:      #ECE3D0;
+      --paper-mute: #BFB39C;
+
+      --mirror:      #2E6B7E;
+      --mirror-lit:  #4FA3BC;
+      --mirror-deep: #0F2A3B;
+      --mirror-frost:#DCE9EC;
+
+      --contrast:     #E85A1A;
+      --contrast-lit: #FF8A3D;
+      --contrast-deep:#5A1B08;
+      --contrast-cand:#FFD08A;
+
+      --display: 'Haettenschweiler', 'Arial Narrow Bold', 'Franklin Gothic Bold', Impact, sans-serif;
+      --mono: ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
+      --body: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      font-family: var(--body);
+      background:
+        radial-gradient(120% 80% at 50% -10%, #241f1b 0%, var(--ink) 55%, #120f0d 100%);
+      color: var(--paper);
+      height: 100dvh; overflow: hidden;
+      display: flex; flex-direction: column;
+      padding: 14px 14px calc(14px + env(safe-area-inset-bottom));
+      gap: 12px;
+    }
+
+    /* film grain — keeps it textural, never sterile */
+    .grain {
+      position: fixed; inset: 0; z-index: 50; pointer-events: none;
+      mix-blend-mode: screen; opacity: .10;
+      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='400' height='400'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.95 0 0 0 0 0.89 0 0 0 0 0.78 0 0 0 0.10 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+    }
+
+    /* --- top banner link (prominent CTA — we want visits) ------ */
+    .project-banner {
+      flex-shrink: 0;
+      display: flex; align-items: center; justify-content: space-between; gap: 14px;
+      text-decoration: none; color: var(--ink);
+      background: linear-gradient(180deg, var(--paper) 0%, #DDD2BB 100%);
+      border: none; border-radius: 16px; padding: 16px 16px 16px 20px;
+      box-shadow: 0 6px 26px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.5);
+    }
+    .project-banner .pb-text { display: flex; flex-direction: column; gap: 3px; text-align: left; }
+    .project-banner .pb-kicker {
+      font-family: var(--mono); font-size: .58rem; letter-spacing: .24em;
+      text-transform: uppercase; color: var(--contrast); opacity: .85;
+    }
+    .project-banner .pb-title {
+      font-family: var(--display); font-weight: 400;
+      font-size: 1.5rem; line-height: .92; letter-spacing: .01em; text-transform: uppercase;
+    }
+    .project-banner .arrow {
+      flex-shrink: 0; width: 44px; height: 44px; border-radius: 50%;
+      display: grid; place-items: center; font-size: 1.3rem;
+      background: var(--contrast); color: var(--paper);
+      box-shadow: 0 3px 12px rgba(232,90,26,.5);
+    }
+    .project-banner:active { transform: scale(.99); filter: brightness(.97); }
+
+    h1 {
+      flex-shrink: 0;
+      font-family: var(--mono); font-weight: 400;
+      font-size: .74rem; letter-spacing: .26em; text-transform: uppercase;
+      text-align: center; margin: 2px 0 0; color: var(--paper-mute);
+    }
+
+    /* --- the two big choices ----------------------------------- */
+    .buttons { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; }
+    button.vote {
+      position: relative; flex: 1; min-height: 0;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+      border: 2px solid transparent; border-radius: 22px;
+      color: var(--paper); cursor: pointer; overflow: hidden;
+      padding: 8px 16px;
+      transition: transform .12s ease, opacity .35s ease, box-shadow .35s ease, border-color .35s ease, filter .35s ease;
+    }
+    button.vote:active { transform: scale(.985); }
+    button.vote .glyph {
+      font-family: var(--mono); font-size: clamp(1.6rem, 9vw, 3rem); line-height: 1;
+      letter-spacing: -.02em; opacity: .9;
+    }
+    button.vote .word {
+      font-family: var(--display); font-weight: 400;
+      font-size: clamp(2.6rem, 15vw, 5rem); line-height: .84;
+      letter-spacing: .01em; text-transform: uppercase;
+    }
+    button.vote .sub {
+      font-family: var(--mono); font-size: .72rem; letter-spacing: .1em;
+      text-transform: uppercase; opacity: .78; margin-top: 2px;
+    }
+    /* selection pill — only on the chosen button, out of the way of the copy */
+    button.vote::after {
+      content: '';
+      position: absolute; top: 12px; right: 14px;
+      font-family: var(--mono); font-size: .56rem; letter-spacing: .2em; text-transform: uppercase;
+      padding: 5px 11px; border-radius: 999px;
+      background: rgba(26,23,21,.4); color: var(--paper);
+      opacity: 0; transform: translateY(-4px); transition: opacity .3s ease, transform .3s ease;
+    }
+    button.vote.active::after { content: '\25CF Selected'; opacity: 1; transform: translateY(0); }
+
+    #btn-mirror {
+      background:
+        radial-gradient(140% 100% at 50% 0%, var(--mirror-lit) 0%, var(--mirror) 42%, var(--mirror-deep) 100%);
+      border-color: rgba(220,233,236,.18);
+    }
+    #btn-contrast {
+      background:
+        radial-gradient(140% 100% at 50% 0%, var(--contrast-lit) 0%, var(--contrast) 42%, var(--contrast-deep) 100%);
+      border-color: rgba(255,208,138,.2);
+    }
+    #btn-mirror.active   { border-color: var(--mirror-frost); box-shadow: 0 0 0 3px var(--ink), 0 0 34px rgba(79,163,188,.55); }
+    #btn-contrast.active { border-color: var(--contrast-cand); box-shadow: 0 0 0 3px var(--ink), 0 0 34px rgba(255,138,61,.55); }
+
+    /* when a choice is made, the road-not-taken recedes */
+    .buttons:has(.active) .vote:not(.active) { opacity: .42; filter: saturate(.6); }
+
+    /* --- crowd tally ------------------------------------------- */
+    #tally {
+      flex-shrink: 0;
+      text-align: center; font-family: var(--mono);
+      font-size: .8rem; letter-spacing: .12em; text-transform: uppercase;
+      color: var(--paper); min-height: 1.4em;
+    }
+    .hint {
+      flex-shrink: 0;
+      text-align: center; font-family: var(--mono);
+      font-size: .58rem; letter-spacing: .16em; text-transform: uppercase;
+      opacity: .38;
+    }
+  </style>
+</head>
+<body>
+  <div class="grain" aria-hidden="true"></div>
+
+  <a class="project-banner" href="https://rapp-lab.roboticart.org/" target="_blank" rel="noopener">
+    <span class="pb-text">
+      <span class="pb-kicker">RAPP Lab</span>
+      <span class="pb-title">Find out more about our project</span>
+    </span>
+    <span class="arrow">&#8599;</span>
+  </a>
+
+  <h1>Tap to steer the robot</h1>
+
+  <div class="buttons">
+    <button id="btn-mirror" class="vote">
+      <span class="glyph">&#8648;&#8648;</span>
+      <span class="word">Mirror</span>
+      <span class="sub">move with the performer</span>
+    </button>
+    <button id="btn-contrast" class="vote">
+      <span class="glyph">&#8645;</span>
+      <span class="word">Contrast</span>
+      <span class="sub">move against the performer</span>
+    </button>
+  </div>
+
+  <div id="tally">&nbsp;</div>
+  <div class="hint">Your vote keeps counting while this page is open</div>
+
+  <script src="vote-api.js"></script>
+  <script>
+    var current = null;
+    var btnMirror = document.getElementById('btn-mirror');
+    var btnContrast = document.getElementById('btn-contrast');
+    var tally = document.getElementById('tally');
+
+    function setChoice(choice) {
+      current = choice;
+      btnMirror.classList.toggle('active', choice === 'mirror');
+      btnContrast.classList.toggle('active', choice === 'contrast');
+      VoteAPI.sendVote(choice);
+    }
+
+    btnMirror.addEventListener('click', function () { setChoice('mirror'); });
+    btnContrast.addEventListener('click', function () { setChoice('contrast'); });
+
+    // Heartbeat: re-send the current choice every 10s so this device stays "active".
+    setInterval(function () { if (current) VoteAPI.sendVote(current); }, 10000);
+
+    // Live tally so voters feel the crowd.
+    VoteAPI.onState(function (s) {
+      if (!s || typeof s.mirror !== 'number') { tally.textContent = ''; return; }
+      tally.textContent = 'Mirror ' + s.mirror + '  ·  Contrast ' + s.contrast +
+        '  (' + s.active + ' voting)';
+    }, 1500);
+  </script>
+</body>
+</html>
