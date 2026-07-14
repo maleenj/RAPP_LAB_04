@@ -94,15 +94,15 @@ This document provides the full technical details of the Vision-Action Model (VA
 
 | Component | File | Lines |
 |-----------|------|-------|
-| Model architecture | `vam_utils/model/act.py` | 218 |
-| Model config | `vam_utils/config/model_config.py` | 124 |
-| Training losses | `vam_utils/training/losses.py` | 86 |
-| Trainer | `vam_utils/training/trainer.py` | 285 |
-| Dataset | `vam_utils/data/dataset.py` | 150 |
-| Normalization | `vam_utils/data/normalization.py` | 138 |
-| Input assembler | `vam_utils/inference/input_assembler.py` | 117 |
-| Temporal ensemble | `vam_utils/inference/temporal_ensemble.py` | 144 |
-| Safety checker | `vam_utils/inference/safety_checker.py` | 150 |
+| Model architecture | `vam/vam_utils/model/act.py` | 218 |
+| Model config | `vam/vam_utils/config/model_config.py` | 124 |
+| Training losses | `vam/vam_utils/training/losses.py` | 86 |
+| Trainer | `vam/vam_utils/training/trainer.py` | 285 |
+| Dataset | `vam/vam_utils/data/dataset.py` | 150 |
+| Normalization | `vam/vam_utils/data/normalization.py` | 138 |
+| Input assembler | `vam/vam_utils/inference/input_assembler.py` | 117 |
+| Temporal ensemble | `vam/vam_utils/inference/temporal_ensemble.py` | 144 |
+| Safety checker | `vam/vam_utils/inference/safety_checker.py` | 150 |
 | ROS2 inference node | `ros2_ws/src/vam_inference/vam_inference/vam_node.py` | 492 |
 | **Total vam_utils** | | **~2,211** |
 

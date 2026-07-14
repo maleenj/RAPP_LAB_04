@@ -129,7 +129,7 @@ The three pages are plain but fully working. To restyle them, the design only ne
 
 ## Files
 ```
-fringe_vote/web/        -> upload to Hostinger
+viz/fringe_vote/web/        -> upload to Hostinger
   schema.sql            -> paste into phpMyAdmin SQL tab
   config.example.php    -> copy to config.php, fill DB creds (git-ignored)
   vote-api.js           -> the JS contract

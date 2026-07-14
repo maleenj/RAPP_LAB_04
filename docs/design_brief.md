@@ -364,7 +364,7 @@ InputAssembler → VAMModel → TemporalEnsemble → SafetyChecker → FollowJoi
 
 #### Implementation Architecture
 
-**Core Inference Utilities** (`vam_utils/inference/`, no ROS2 dependency):
+**Core Inference Utilities** (`vam/vam_utils/inference/`, no ROS2 dependency):
 
 | Module | Purpose |
 |--------|---------|
@@ -447,7 +447,7 @@ Five layers of protection, all implemented:
 - **Safety warnings at WARN level** — All constraint violations are visible in the ROS2 log output
 
 #### Deliverables (Complete)
-- Inference utilities: `vam_utils/inference/` (input_assembler, model_wrapper, temporal_ensemble, safety_checker)
+- Inference utilities: `vam/vam_utils/inference/` (input_assembler, model_wrapper, temporal_ensemble, safety_checker)
 - Offline testing notebook: `04_inference_test.ipynb`
 - ROS2 package: `ros2_ws/src/vam_inference/`
 - Launch files: `vam_rviz.launch.py`, `vam_robot.launch.py`, `vam_inference.launch.py`

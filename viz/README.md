@@ -6,8 +6,8 @@ datasets and letting **students replay them offline without ROS or the robot**.
 
 This is the master guide. Component-level docs:
 - `ros2_ws/src/vam_viz_bridge/README.md` — the bridge package in depth
-- `viz_student_pack/README.md` — the hand-to-students bundle
-- `viz_student_pack/unity/README.md` — Unity step-by-step
+- `student_pack/README.md` — the hand-to-students bundle
+- `student_pack/unity/README.md` — Unity step-by-step
 
 ---
 
@@ -141,7 +141,7 @@ Expected:
 ```
 
 **3. Browser viewer (any OS, zero install):**
-- Open `viz_student_pack/web/index.html` (double-click).
+- Open `student_pack/web/index.html` (double-click).
 - Type `ws://<host-ip>:8765`, click **Connect**.
 - Banner turns **green** and joint bars move.
 
@@ -152,14 +152,14 @@ workshop WiFi — both receive identical data simultaneously.
 
 ## Part C — Connect Unity / Unreal
 
-Full Unity walkthrough: `viz_student_pack/unity/README.md`. The Unity pack is
+Full Unity walkthrough: `student_pack/unity/README.md`. The Unity pack is
 designed so students **focus on visuals, not plumbing** — no JSON package needed
 (a tiny parser is bundled).
 
 **Unity — fastest test (the inspector):**
 1. Install **NativeWebSocket** (Package Manager → Add from git URL:
    `https://github.com/endel/NativeWebSocket.git#upm`).
-2. Drag the `viz_student_pack/unity/` folder into `Assets/`.
+2. Drag the `student_pack/unity/` folder into `Assets/`.
 3. Empty GameObject → **Add Component → EnactClient** (set `Url = ws://<host-ip>:8765`)
    → **Add Component → EnactInspector** → press **Play**.
 4. An overlay lists **every** channel: joints as bars, attention/activation
@@ -201,7 +201,7 @@ docker exec -it rapp_vam bash -lc '
 
 # 2) in another terminal, record for 60s straight to the student pack (host):
 python3 ros2_ws/src/vam_viz_bridge/tools/record_stream.py \
-    ws://localhost:8765 --out viz_student_pack/recordings/r1g1.jsonl --duration 60
+    ws://localhost:8765 --out student_pack/recordings/r1g1.jsonl --duration 60
 ```
 *(`python3 ros2_ws/.../record_stream.py` runs on the host — needs
 `pip install websockets`. Alternatively run it inside `rapp_viz` with
@@ -212,7 +212,7 @@ Same recorder; just have the real pipeline running so `/joint_states` (and, if t
 viz node + skeleton relay are up, `activations` / `skeleton`) are live, then:
 ```bash
 python3 ros2_ws/src/vam_viz_bridge/tools/record_stream.py \
-    ws://localhost:8765 --out viz_student_pack/recordings/live_demo.jsonl --duration 90
+    ws://localhost:8765 --out student_pack/recordings/live_demo.jsonl --duration 90
 ```
 Whatever channels the bridge streams at that moment get recorded.
 
@@ -223,12 +223,12 @@ Ctrl-C). Files are ~1 MB/minute for joints — safe to commit / put on a USB.
 
 ## Part E — Play recordings back
 
-`viz_student_pack/player.py` is a **standalone, cross-platform** replay server.
+`student_pack/player.py` is a **standalone, cross-platform** replay server.
 Only dependency: `websockets`. No ROS, no robot. It serves the recording on the
 same WebSocket protocol, paced to the original timing.
 
 ```bash
-cd viz_student_pack
+cd viz/student_pack
 python3 player.py recordings/r1g1.jsonl --loop
 ```
 It prints the addresses to connect to:
@@ -252,10 +252,10 @@ if it were live.
 
 ## Part F — Student setup & Workshop Day-1
 
-Everything students need is the folder **`viz_student_pack/`**. Hand it over via
+Everything students need is the folder **`student_pack/`**. Hand it over via
 USB / shared drive / zip. It contains:
 ```
-viz_student_pack/
+student_pack/
 ├── README.md            ← student-facing instructions (Windows/Mac)
 ├── player.py            ← offline replay server
 ├── recordings/*.jsonl   ← sample datasets
@@ -267,7 +267,7 @@ viz_student_pack/
 Stream a looping recording so many students can connect to a stable, repeatable
 source while they set up:
 ```bash
-cd viz_student_pack
+cd viz/student_pack
 python3 player.py recordings/r1g1.jsonl --loop
 ```
 Then tell students: **open `web/index.html`, enter `ws://<host-ip>:8765`, click
@@ -432,7 +432,7 @@ docker/
 
 **Student pack (hand to students):**
 ```
-viz_student_pack/
+student_pack/
 ├── README.md                            # student instructions
 ├── player.py                            # offline replay server (no ROS)
 ├── recordings/{r1g1,r2g1}.jsonl         # sample datasets

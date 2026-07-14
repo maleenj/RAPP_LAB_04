@@ -25,7 +25,7 @@ Both containers share the same volumes:
 | Host path | Container path | Purpose |
 |---|---|---|
 | `ros2_ws/` | `/workspace/ros2_ws` | VAM inference ROS2 package |
-| `vam_utils/` | `/workspace/vam_utils` | Shared utilities |
+| `vam/vam_utils/` | `/workspace/vam_utils` | Shared utilities |
 | `notebooks/` | `/workspace/notebooks` | Jupyter notebooks |
 | `scripts/` | `/workspace/scripts` | Helper scripts |
 | `config/` | `/config` | Configuration files |
@@ -340,7 +340,7 @@ ros2 launch vam_inference vam_tm12s_robot.launch.py \
 | `ros2_ws/src/vam_inference/vam_inference/vam_pvt_streamer.py` | PVT streamer node |
 | `ros2_ws/src/vam_inference/vam_inference/vam_tm12s_node.py` | VAM inference node |
 | `ros2_ws/src/vam_interfaces/srv/SwitchModel.srv` | Model switch service definition |
-| `vam_utils/data/robot_configs.py` | TM12S joint names, limits, velocities |
+| `vam/vam_utils/data/robot_configs.py` | TM12S joint names, limits, velocities |
 | `docker/docker-compose.hw.yml` | Hardware container compose file |
 | `docker/docker-compose.yml` | VAM container compose file |
 

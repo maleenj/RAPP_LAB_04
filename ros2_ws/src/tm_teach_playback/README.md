@@ -28,7 +28,7 @@ Playback sends goals to the MoveIt `move_action` server using planning group
 2. **Bring up the robot + MoveIt** (playback needs the `move_action` server, and
    recording needs `/joint_states`). Use the hardware MoveIt launch — **not**
    `demo.launch.py` / `tm12s_moveit.launch.py`, which start a fake ros2_control
-   stack that publishes competing zero joint states (see [README_TM](../../../README_TM.md)):
+   stack that publishes competing zero joint states (see [hardware/README](../../../hardware/README.md)):
    ```bash
    ros2 launch <tm bringup> tm12s_moveit_hw.launch.py
    ```

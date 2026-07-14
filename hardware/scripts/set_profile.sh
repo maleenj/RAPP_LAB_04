@@ -5,17 +5,17 @@
 # Each profile contains: tm12s.urdf.xacro + tm12s.srdf
 #
 # Usage:
-#   ./scripts/set_profile.sh              # list available profiles
-#   ./scripts/set_profile.sh <name>       # activate profile <name>
+#   ./hardware/scripts/set_profile.sh              # list available profiles
+#   ./hardware/scripts/set_profile.sh <name>       # activate profile <name>
 #
 # After this runs: Ctrl+C your three ROS launches and re-run them.
 
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ACTIVE_DIR="$REPO_ROOT/docker/hw/urdf_override"
 PROFILE_DIR="$ACTIVE_DIR/profiles"
-APPLY_SCRIPT="$REPO_ROOT/scripts/apply_prop_changes.sh"
+APPLY_SCRIPT="$REPO_ROOT/hardware/scripts/apply_prop_changes.sh"
 
 list_profiles() {
     if [ ! -d "$PROFILE_DIR" ]; then

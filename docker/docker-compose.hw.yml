@@ -48,9 +48,10 @@ services:
       - ./hw/urdf_override/tm12s.srdf:/tm2_ws/install/tm12s_moveit_config/share/tm12s_moveit_config/config/tm12s.srdf:ro
 
       # Code directories (development mode)
-      - ../vam_utils:/workspace/vam_utils:rw
-      - ../notebooks_ur:/workspace/notebooks_ur:rw
-      - ../notebooks_tm:/workspace/notebooks_tm:rw
+      # NOTE: container-side paths are unchanged from the pre-reorg layout
+      - ../vam/vam_utils:/workspace/vam_utils:rw
+      - ../legacy/notebooks_ur:/workspace/notebooks_ur:rw
+      - ../vam/notebooks:/workspace/notebooks_tm:rw
       - ../ros2_ws:/workspace/ros2_ws:rw
       - ../scripts:/workspace/scripts:rw
 

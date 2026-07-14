@@ -232,12 +232,12 @@ Replay it anywhere with the standalone, cross-platform player (only needs
 `pip install websockets`, no ROS) — clients connect exactly as if it were live:
 
 ```bash
-python3 ../../../viz_student_pack/player.py rec.jsonl --loop
+python3 ../../../viz/student_pack/player.py rec.jsonl --loop
 # -> ws://localhost:8765
 ```
 
 The full student-facing bundle (player, sample recordings, browser viewer, Unity
-scripts + guide) lives in [`viz_student_pack/`](../../../viz_student_pack/). See
+scripts + guide) lives in [`viz/student_pack/`](../../../viz/student_pack/). See
 its `README.md` for the Windows/Mac day-1 runbook.
 
 ## Phase 2 — neural-network activations (the "brain scan")
