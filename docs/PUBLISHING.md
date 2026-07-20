@@ -32,7 +32,15 @@ RAPP_LAB_04 repo is a frozen archive.
 
 ## 2. Push Docker images to GHCR
 
-Needs a GitHub login with `write:packages` on the org (once per machine):
+Needs a GitHub account with package-publish rights on the org, logged in
+once per machine. Either use a classic Personal Access Token with the
+`write:packages` scope (GitHub → Settings → Developer settings → Tokens):
+
+```bash
+echo "<YOUR_TOKEN>" | docker login ghcr.io -u <your-github-username> --password-stdin
+```
+
+or, if the `gh` CLI is installed and authenticated:
 
 ```bash
 gh auth token | docker login ghcr.io -u <your-github-username> --password-stdin
